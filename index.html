@@ -202,6 +202,7 @@
   .source h3 { margin:0; font-size:15px; }
   .source .repo { color:var(--muted); font-size:13px; margin-top:2px; }
   .record { margin-top:12px; padding-top:12px; border-top:1px solid var(--hairline); }
+  .record.compact { margin-top:4px; padding-top:0; border-top:none; }
   .record .cite { font-size:13px; color:var(--secondary); }
   .record a { color:var(--accent); text-decoration:none; }
   .record a:hover { text-decoration:underline; }
@@ -760,10 +761,14 @@ function renderStory(p) {
     '<div class="story">' + p.lifeStory.map(t => "<p>" + esc(t) + "</p>").join("") + "</div>", true);
 }
 
+/* No client-side re-sort: the exporter already emits `timeline` in the Mac
+   app's own order (Person.timeline / EventCatalog.isBeforeManual) — chronological,
+   undated last, UNLESS the person has manually reordered events on the Mac, in
+   which case that manual order wins. A naive re-sort by year here would silently
+   undo a manual fix for any undated event, since year is all it has to go on. */
 function renderTimeline(p) {
   if (!p.timeline || !p.timeline.length) return "";
-  const rows = p.timeline.slice()
-    .sort((a, b) => (a.year || 9999) - (b.year || 9999))
+  const rows = p.timeline
     .map(e =>
       '<div class="tl"><div class="yr">' + esc(e.date || "") + '</div>' +
       '<div class="ev"><b>' + esc(e.label) + '</b>' +
@@ -827,7 +832,7 @@ function renderSources(p) {
        Ancestry-imported one), so show each distinct value once. */
     [...new Set([s.author, s.repository].filter(Boolean))]
       .map(line => '<div class="repo">' + esc(line) + '</div>').join("") +
-    records.map(r => {
+    records.map((r, i) => {
       const link = r.url
         ? '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">' +
           esc(hostOf(r.url)) + ' ↗</a>' : "";
@@ -845,7 +850,13 @@ function renderSources(p) {
                  esc(r.note.body) + '</div>' : "",
         r.text ? '<div class="transcription">' + esc(r.text) + '</div>' : ""
       ].join("");
-      return '<div class="record"><div class="cite">' + cite + '</div>' + words + '</div>';
+      /* A hairline earns its keep separating a block of prose from its
+         neighbours. Between two bare citations — just a page ref or a link,
+         nothing to read — it's only visual noise, so skip it there. */
+      const hasWords = !!(r.note || r.text);
+      const prevHadWords = i > 0 && !!(records[i - 1].note || records[i - 1].text);
+      const compact = i > 0 && !hasWords && !prevHadWords;
+      return '<div class="record' + (compact ? " compact" : "") + '"><div class="cite">' + cite + '</div>' + words + '</div>';
     }).join("") +
     '</div>').join("");
   return block("Sources & Records", cards);
