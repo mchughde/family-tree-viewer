@@ -1,0 +1,34 @@
+# Terms the privacy guard should NOT block, one per line, case-insensitive.
+#
+# Only for genuine collisions between the tree's vocabulary and ordinary words or
+# already-public project names. Every line here is a hole in the guard, so add
+# sparingly and say why.
+#
+# NOTE: this file is committed, so it must never hold anything actually private.
+
+# The project's own name, already throughout the repo, the app title and the
+# window title. Reconsider before the Pages site goes public: a public
+# "McHugh Family Tree" heading says whose tree it is.
+mchugh
+
+# Ordinary English words that are also names in this tree. Each is a small hole —
+# the word alone will no longer be flagged — accepted because the collision
+# otherwise fires on unrelated prose ("grace period", "daily backup") often
+# enough to train everyone to reach for --no-verify.
+grace
+daily
+birth date
+
+# Also a given name in the tree, and it appears in the Co-Authored-By trailer on
+# every commit, so leaving it in would block all work. The surname beside it is
+# still guarded, which is the part that identifies anyone.
+claude
+
+# --- Shell-repo additions -----------------------------------------------------
+# Ordinary English that collides with a term in the tree's own data. None of these
+# identifies anyone; blocking them would flag this repo's CSS and code comments.
+buried
+seven
+southern
+marks
+neutral

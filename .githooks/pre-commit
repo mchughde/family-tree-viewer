@@ -1,0 +1,33 @@
+#!/bin/sh
+# Blocks tree content from being committed. See .githooks/README.md.
+# Escape hatch, for a genuine false positive only: git commit --no-verify
+
+. "$(git rev-parse --show-toplevel)/.githooks/guard.sh"
+
+status=0
+
+# --- 1. Structural: files that are tree content by their nature ---------------
+bad_paths=$(git diff --cached --name-only --diff-filter=ACMR | guard_paths)
+if [ -n "$bad_paths" ]; then
+  fail_banner
+  echo "  These files must never be committed:"
+  printf "%s\n" "$bad_paths" | sed "s/^/    /"
+  echo ""
+  echo "  They belong outside the working tree (~/Downloads/familyweb-dev/)."
+  status=1
+fi
+
+# --- 2. Terms: real names, places, source titles in the staged diff -----------
+found=$(git diff --cached --diff-filter=ACMR | grep '^+' | guard_terms "staged changes")
+if [ -n "$found" ]; then
+  fail_banner
+  echo "  Real tree content in the staged changes:"
+  printf "%s\n" "$found" | sed "s/^/    /"
+  echo ""
+  echo "  Rewrite it generically. Sample data must be fictional."
+  echo "  If a term is genuinely innocuous, add it to .githooks/allow.txt."
+  status=1
+fi
+
+terms_missing_warning
+exit $status

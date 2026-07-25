@@ -1,0 +1,24 @@
+#!/bin/sh
+# Blocks real tree content in the COMMIT MESSAGE — the leak .gitignore can't see,
+# and the one that actually happened here (a real first name and three archive
+# names in a commit body, caught only by chance before any push).
+# See .githooks/README.md. Escape hatch: git commit --no-verify
+
+. "$(git rev-parse --show-toplevel)/.githooks/guard.sh"
+
+# Strip comment lines; git's template explains nothing we need to scan.
+found=$(grep -v '^#' "$1" | guard_terms "commit message")
+if [ -n "$found" ]; then
+  fail_banner
+  echo "  Real tree content in the commit message:"
+  printf "%s\n" "$found" | sed "s/^/    /"
+  echo ""
+  echo "  Describe the change without naming real people, places or sources —"
+  echo "  \"a person's note\" rather than the person. Commit history is forever,"
+  echo "  and it is published in full the moment the repo goes to GitHub."
+  echo ""
+  echo "  Your message was kept: .git/COMMIT_EDITMSG"
+  exit 1
+fi
+
+exit 0

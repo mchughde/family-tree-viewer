@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Add to Home Screen on iPad launches this without Safari's chrome, which is the
+     whole point of the PWA. The status bar picks up the page background, so the
+     theme-colour pair must match Palette's page colour in both appearances. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Family Tree">
+<meta name="theme-color" content="#F4EFE7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1F1C19" media="(prefers-color-scheme: dark)">
+<title>Family Tree — Viewer</title>
+<style>
+  :root {
+    --page:#F4EFE7; --card:#FDFCF9; --ink:#2B2621; --secondary:#847A6F;
+    --muted:#A89C8C; --accent:#8A3D4D; --accent-soft:#EFE2E4; --border:#E7DFD0;
+    --hairline:#E0D5C2; --connector:#C7BAA5; --male:#5F7C9E; --female:#BE6076; --neutral:#9B9083;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --shadow:0 1px 2px rgba(43,38,33,.05),0 6px 20px rgba(43,38,33,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:#1F1C19; --card:#2A2622; --ink:#ECE5DB; --secondary:#ACA093;
+      --muted:#817668; --accent:#D3899A; --accent-soft:#3E2B31; --border:#3A352F;
+      --hairline:#423B33; --connector:#565049; --male:#89A6C4; --female:#DE97A8; --neutral:#8C8173;
+      --shadow:0 1px 2px rgba(0,0,0,.25),0 6px 20px rgba(0,0,0,.30);
+    }
+  }
+  :root[data-theme="light"] {
+    --page:#F4EFE7; --card:#FDFCF9; --ink:#2B2621; --secondary:#847A6F;
+    --muted:#A89C8C; --accent:#8A3D4D; --accent-soft:#EFE2E4; --border:#E7DFD0;
+    --hairline:#E0D5C2; --connector:#C7BAA5; --male:#5F7C9E; --female:#BE6076; --neutral:#9B9083;
+    --shadow:0 1px 2px rgba(43,38,33,.05),0 6px 20px rgba(43,38,33,.06);
+  }
+  :root[data-theme="dark"] {
+    --page:#1F1C19; --card:#2A2622; --ink:#ECE5DB; --secondary:#ACA093;
+    --muted:#817668; --accent:#D3899A; --accent-soft:#3E2B31; --border:#3A352F;
+    --hairline:#423B33; --connector:#565049; --male:#89A6C4; --female:#DE97A8; --neutral:#8C8173;
+    --shadow:0 1px 2px rgba(0,0,0,.25),0 6px 20px rgba(0,0,0,.30);
+  }
+
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    margin:0; background:var(--page); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app { display:grid; grid-template-columns:300px 1fr; height:100vh; }
+
+  /* ---- Sidebar: person list ---- */
+  .sidebar {
+    background:var(--card); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  .brand { padding:18px 18px 12px; }
+  .brand h1 { margin:0; font-size:15px; letter-spacing:.02em; }
+  .brand .sub { color:var(--muted); font-size:12px; margin-top:2px; }
+  .search {
+    margin:0 14px 10px; padding:8px 12px; border:1px solid var(--border);
+    border-radius:9px; background:var(--page); color:var(--secondary);
+    font-size:13px; display:flex; align-items:center; gap:8px;
+  }
+  .search:focus-within { border-color:var(--accent); }
+  .search svg { width:14px; height:14px; opacity:.6; flex:0 0 auto; }
+  .search input {
+    border:0; padding:0; background:transparent; color:var(--ink);
+    font-family:inherit; font-size:13px; width:100%; min-width:0; outline:none;
+  }
+  .search input::placeholder { color:var(--secondary); }
+  .people { overflow-y:auto; padding:4px 8px 16px; min-height:0; }
+  .group-label {
+    font-size:11px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--muted); padding:12px 10px 6px;
+  }
+  .prow {
+    display:flex; align-items:center; gap:11px; padding:8px 10px;
+    border-radius:10px; cursor:pointer; text-decoration:none; color:inherit;
+  }
+  .prow:hover { background:var(--page); }
+  .prow.active { background:var(--accent-soft); }
+  .prow.active .pname { color:var(--accent); font-weight:600; }
+  .pname { font-size:14px; line-height:1.2; }
+  .pyears { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; margin-top:1px; }
+  .noresults { color:var(--muted); font-size:13px; padding:16px 10px; }
+
+  /* ---- Monogram avatars (whole badge tinted by sex, like the app) ---- */
+  .mono {
+    --tint:var(--neutral);
+    flex:0 0 auto; display:grid; place-items:center; border-radius:50%;
+    color:var(--tint); font-weight:600; letter-spacing:.02em;
+    background:color-mix(in srgb, var(--tint) 18%, transparent);
+    box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--tint) 42%, transparent);
+  }
+  .mono.sm { width:34px; height:34px; font-size:12px; }
+  .mono.md { width:44px; height:44px; font-size:15px; }
+  .mono.lg { width:76px; height:76px; font-size:26px; }
+  .mono.male   { --tint:var(--male); }
+  .mono.female { --tint:var(--female); }
+
+  /* ---- Detail column ---- */
+  .detail { overflow-y:auto; min-height:0; }
+  .sheet { max-width:720px; margin:0 auto; padding:34px 28px 64px; }
+
+  /* ---- Cards ----
+     The identity header, Life Story and Timeline each sit on a card, as on the
+     Mac app's Details page. Family and Sources deliberately do NOT get one: their
+     contents are already cards (person chips, one mini card per source) and
+     wrapping cards in a card only doubles the borders. */
+  .card {
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:20px 22px; box-shadow:var(--shadow);
+  }
+  .idhead { display:flex; gap:20px; align-items:center; }
+  .idhead h2 { margin:0; font-size:27px; line-height:1.12; letter-spacing:-.01em; text-wrap:balance; }
+  .idhead .life { color:var(--secondary); font-size:16px; margin-top:5px; font-variant-numeric:tabular-nums; }
+  .idhead .whereline { color:var(--muted); font-size:14px; margin-top:3px; }
+
+  /* Cards carry their own visual separation, so the old 34px gap between bare
+     sections is now too much air. */
+  section.block { margin-top:18px; }
+  .label {
+    font-size:12px; text-transform:uppercase; letter-spacing:.1em;
+    color:var(--accent); font-weight:600; margin:0 0 14px;
+    padding-bottom:8px; border-bottom:1px solid var(--hairline);
+  }
+  .thin { color:var(--muted); font-size:14px; }
+
+  /* ---- Life story prose ---- */
+  .story { font-family:var(--serif); font-size:18px; line-height:1.66; color:var(--ink); }
+  .story p { margin:0 0 1.05em; max-width:62ch; }
+  .story p:last-child { margin-bottom:0; }
+
+  /* ---- Timeline ----
+     The spine is drawn per event (dot → next dot), not as one bar down the
+     whole list, so it starts at the first dot and stops at the last one
+     instead of hanging past it. All the geometry derives from --dot / --spine
+     / --axis, so the dot and the line can't drift apart. */
+  .timeline { --dot:11px; --spine:2px; --axis:20px; position:relative; margin-left:6px; padding-left:26px; }
+  .tl {
+    /* The dot marks the EVENT, so it centres on the bold event line rather
+       than the year eyebrow above it: clear the year's line box (13px × 1.5)
+       and .ev's margin, then centre the dot in .ev's line box (15px × 1.5). */
+    --dot-top:calc(13px * 1.5 + 1px + (15px * 1.5 - var(--dot)) / 2);
+    position:relative; padding:0 0 20px;
+  }
+  .tl:last-child { padding-bottom:0; }
+  .tl::before {                        /* the event's dot */
+    content:""; position:absolute; top:var(--dot-top);
+    left:calc((var(--axis) + var(--dot) / 2) * -1);
+    width:var(--dot); height:var(--dot); border-radius:50%; background:var(--accent);
+  }
+  .tl::after {                         /* spine segment down to the next dot */
+    content:""; position:absolute;
+    left:calc((var(--axis) + var(--spine) / 2) * -1);
+    top:calc(var(--dot-top) + var(--dot)); bottom:calc(var(--dot-top) * -1);
+    width:var(--spine); background:var(--hairline);
+  }
+  .tl:last-child::after { content:none; }
+  .tl .yr { font-size:13px; line-height:1.5; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tl .ev { font-size:15px; margin-top:1px; }
+  .tl .ev b { font-weight:600; }
+  .tl .ev .place { color:var(--secondary); }
+  .tl .note { color:var(--muted); font-size:14px; margin-top:2px; }
+
+  /* ---- Family ---- */
+  .subhead { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--secondary); margin:18px 0 8px; }
+  .subhead:first-child { margin-top:0; }
+  .union-meta { color:var(--muted); font-size:13px; font-weight:400; text-transform:none; letter-spacing:0; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip {
+    display:flex; align-items:center; gap:9px; padding:6px 12px 6px 6px;
+    background:var(--card); border:1px solid var(--border); border-radius:999px;
+    text-decoration:none; color:inherit; box-shadow:var(--shadow);
+  }
+  .chip:hover { border-color:var(--accent); }
+  .chip .pname { font-size:13px; }
+  .chip .pyears { font-size:11px; }
+
+  /* ---- Sources ---- */
+  /* One mini card per source — a long shared card buries where each record ends. */
+  .source { border:1px solid var(--border); border-radius:12px; background:var(--card); padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow); }
+  .source:last-child { margin-bottom:0; }
+  .source h3 { margin:0; font-size:15px; }
+  .source .repo { color:var(--muted); font-size:13px; margin-top:2px; }
+  .record { margin-top:12px; padding-top:12px; border-top:1px solid var(--hairline); }
+  .record .cite { font-size:13px; color:var(--secondary); }
+  .record a { color:var(--accent); text-decoration:none; }
+  .record a:hover { text-decoration:underline; }
+  .record .bare { font-style:italic; color:var(--muted); }
+  .transcription {
+    font-family:var(--serif); font-size:15px; line-height:1.55; color:var(--ink);
+    margin-top:8px; padding:11px 14px; background:var(--page);
+    border-left:3px solid var(--accent-soft); border-radius:0 8px 8px 0;
+    white-space:pre-line;   /* notes are typed with real line breaks; keep them */
+  }
+  /* The "AI summary:" style scaffolding line — present, but not the thing to read. */
+  .transcription .note-label {
+    display:block; font-family:var(--sans); font-size:11px; letter-spacing:.07em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:6px;
+  }
+
+  footer.credit {
+    margin-top:44px; padding-top:16px; border-top:1px solid var(--hairline);
+    color:var(--muted); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  }
+  .pill {
+    display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px;
+    background:var(--accent-soft); color:var(--accent); letter-spacing:.02em;
+  }
+
+  /* ---- schemaVersion guard: a bundle this viewer can't read ---- */
+  .guard { max-width:520px; margin:12vh auto; padding:26px 28px; text-align:center;
+           border:1px solid var(--border); border-radius:14px; background:var(--card); box-shadow:var(--shadow); }
+  .guard h2 { margin:0 0 8px; font-size:19px; }
+  .guard p { margin:0; color:var(--secondary); font-size:14px; }
+
+  a { color:var(--accent); }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+
+  /* ---- Top bar with the People toggle (shown at all widths) ---- */
+  .topbar {
+    display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:10;
+    padding:10px 14px; background:var(--page); border-bottom:1px solid var(--border);
+  }
+  .topttl { font-size:14px; font-weight:600; }
+  .scrim { display:none; }
+  .menuBtn {
+    border:1px solid var(--border); background:var(--card); color:var(--ink);
+    font-family:var(--sans); font-size:14px; font-weight:500; cursor:pointer;
+    border-radius:9px; padding:7px 12px; display:inline-flex; align-items:center; gap:7px;
+  }
+  .menuBtn:hover { border-color:var(--accent); }
+
+  /* ---- Wide (iPad / desktop): sidebar is an in-flow column you can collapse ---- */
+  @media (min-width:701px) {
+    body.nav-collapsed .app { grid-template-columns:1fr; }
+    body.nav-collapsed .sidebar { display:none; }
+  }
+
+  /* ---- Narrow (phone / Split View): sidebar slides in over the page ---- */
+  @media (max-width:700px) {
+    .app { grid-template-columns:1fr; }
+    .sidebar {
+      position:fixed; top:0; left:0; bottom:0; width:290px; z-index:30;
+      transform:translateX(-100%); transition:transform .25s ease;
+      box-shadow:0 0 40px rgba(0,0,0,.25);
+    }
+    body.nav-open .sidebar { transform:none; }
+    .scrim { position:fixed; inset:0; z-index:20; background:rgba(20,17,14,.38); }
+    body.nav-open .scrim { display:block; }
+    .sheet { padding:22px 18px 56px; }
+    .idhead h2 { font-size:23px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar { transition:none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <h1 id="treeName">Family Tree</h1>
+      <div class="sub" id="treeSub">read-only</div>
+    </div>
+    <label class="search" for="searchBox">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+      <input id="searchBox" type="search" placeholder="Search people" autocomplete="off" spellcheck="false">
+    </label>
+    <nav class="people" id="peopleNav"></nav>
+  </aside>
+
+  <!-- Scrim behind the slide-in list on narrow screens -->
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ============ Detail ============ -->
+  <main class="detail" id="detail">
+    <div class="topbar">
+      <button class="menuBtn" id="menuBtn" aria-label="Show people list">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+        People
+      </button>
+      <span class="topttl" id="topTitle">Family Tree</span>
+    </div>
+    <div class="sheet" id="sheet"></div>
+  </main>
+</div>
+
+<script>
+/* ============================================================================
+   FIXTURE — shaped exactly like the `tree.json` in ../SCHEMA-v1.md.
+   Fictional Ferrowfield-flavoured content. When the Swift `--export-web` exporter
+   exists, this object is simply replaced by the parsed bundle; nothing below
+   the fixture knows where the data came from.
+   ========================================================================== */
+
+const D = (date, year, place) => ({ date, year, place });
+const E = (tag, label, date, year, place, detail, sourceIds) =>
+  ({ tag, label, type:null, date, year, place:place || null,
+     value:null, detail:detail || null, sourceIds:sourceIds || [] });
+
+/* Records belong to the PEOPLE who cite them (schema v1), so they're named here
+   and referenced from each person's `sources`. A household census record really
+   is every household member's evidence, hence the sharing. */
+const R = {
+  /* A note with a scaffolding label, as the exporter pre-splits it. */
+  census1911: { page:"Merrivale / Marchfield / House 14, Kestrelby Row",
+                url:"https://example.org/census",
+                note:{ label:"AI transcription:",
+                       body:"Ferrowfield, Nathaniel — Head of Family, age 33, Carpenter, Nonconformist, born Ashbury. Clementine, wife, age 31. Tobias 9, Winifred 7, Ambrose 4, Rowena 1. Can read and write." } },
+  /* A note-only citation: no page, no link — still a record. */
+  volumeIndex: { page:null, url:null,
+                 note:{ label:null, body:"Found via the volume index; the page reference is illegible." } },
+  census1901: { page:"Ashbury / Ashbury Urban / House 6, Wrenfield Lane",
+                url:"https://example.org/census",
+                text:"Ferrowfield, Ambrose — Head of Family, age 52, Quarryman, born Ashbury. Rowena, wife, age 49. Nathaniel 23, Lucian 17." },
+  marriage1901: { page:"Merrivale South, 1901, Vol 2, p. 641",
+                  url:"https://example.org/registers", text:null },
+  burial: { page:"North section, grave ref. QF 47½",
+            url:"https://example.org/burials", text:null },
+  warGrave: { page:"Dunmorrow Memorial, Panel 44 — Pte M. Ferrowfield, Northmoor Fusiliers",
+              url:"https://example.org/remembrance",
+              text:"FERROWFIELD, LUCIAN. Private, 2nd Bn. Northmoor Fusiliers. Died 31 July 1917. Son of Ambrose and Rowena Ferrowfield, of Ashbury." }
+};
+
+const FIXTURE = {
+  schemaVersion: 1,
+  generatedAt: "2026-07-25T09:14:00Z",
+  generatorVersion: "FamilyHistory 1.x (mockup fixture)",
+  treeName: "Ferrowfield Family Tree",
+  rootPersonId: "I003",
+
+  people: [
+    {
+      id:"I001", givenName:"Ambrose", surname:"Ferrowfield", sex:"M",
+      birth:D("1849", 1849, "Ashbury, Northmoor"), death:D("4 Feb 1908", 1908, "Ashbury, Northmoor"),
+      lifeStory:[
+        "Ambrose Ferrowfield was born in 1849 in Ashbury, Northmoor. He worked as a stonemason, the trade his own father had followed, and lived in the town all his life.",
+        "He married Rowena Calderwell in 1876. They had three children — Nathaniel Hollis, Isolde and Lucian — of whom Isolde died in infancy. Ambrose died in 1908 at the age of fifty-nine."
+      ],
+      timeline:[
+        E("BIRT","Birth","1849",1849,"Ashbury, Northmoor"),
+        E("MARR","Marriage","1876",1876,"Ashbury, Northmoor","to Rowena Calderwell"),
+        E("OCCU","Occupation","1901",1901,"Ashbury, Northmoor","Stonemason",["S004"]),
+        E("DEAT","Death","4 Feb 1908",1908,"Ashbury, Northmoor","Aged 59")
+      ],
+      parentFamilyId:null, spouseFamilyIds:["F001"],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S004", records:[R.census1901]}]
+    },
+    {
+      id:"I002", givenName:"Rowena", surname:"Calderwell", sex:"F",
+      birth:D("1852", 1852, "Ashbury, Northmoor"), death:D("1921", 1921, "Ashbury, Northmoor"),
+      lifeStory:[
+        "Rowena Calderwell was born in 1852 in Ashbury. She married Ambrose Ferrowfield, a stonemason, in 1876 and raised their family in the town.",
+        "She was widowed in 1908 and lived another thirteen years, dying in Ashbury in 1921 at the age of sixty-nine."
+      ],
+      timeline:[
+        E("BIRT","Birth","1852",1852,"Ashbury, Northmoor"),
+        E("MARR","Marriage","1876",1876,"Ashbury, Northmoor","to Ambrose Ferrowfield"),
+        E("RESI","Residence","1901",1901,"Ashbury, Northmoor","Recorded with husband and two surviving children",["S004"]),
+        E("DEAT","Death","1921",1921,"Ashbury, Northmoor","Aged 69")
+      ],
+      parentFamilyId:null, spouseFamilyIds:["F001"],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S004", records:[R.census1901]}]
+    },
+    {
+      id:"I003", givenName:"Nathaniel Hollis", surname:"Ferrowfield", sex:"M",
+      birth:D("12 Mar 1878", 1878, "Ashbury, Northmoor"), death:D("1951", 1951, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Nathaniel Hollis Ferrowfield was born in 1878 in Ashbury, Northmoor, the eldest son of Ambrose Ferrowfield, a stonemason, and Rowena Calderwell. He was baptised that same year at St John's, in the parish where the family had lived for two generations.",
+        "In 1901, at the age of twenty-three, he married Clementine Verity Bracewood in Merrivale, and the couple settled at 14 Kestrelby Row. They had four children together — Tobias, Winifred, Ambrose and Rowena — born between 1902 and 1910. By the time of the 1911 census the household was recorded there in full, with Nathaniel giving his occupation as carpenter.",
+        "He spent his working life in the building trade and, from about 1919, as a carpenter with the Great Southern Railways. He remained in Merrivale for the rest of his life.",
+        "Nathaniel died in 1951 in Merrivale at the age of seventy-three, and was buried at Oakhaven Cemetery. Clementine survived him by eight years."
+      ],
+      timeline:[
+        E("BIRT","Birth","12 Mar 1878",1878,"Ashbury, Northmoor"),
+        E("BAPM","Baptism","1878",1878,"St John's, Ashbury"),
+        E("MARR","Marriage","1901",1901,"Merrivale, Northmoor","to Clementine Verity Bracewood",["S002"]),
+        E("RESI","Residence","1911",1911,"14 Kestrelby Row, Merrivale","Recorded with wife and four children in the 1911 census",["S001"]),
+        E("OCCU","Occupation","1919",1919,"Merrivale, Northmoor","Carpenter, Great Southern Railways"),
+        E("DEAT","Death","1951",1951,"Merrivale, Northmoor","Aged 73"),
+        E("BURI","Burial","1951",1951,"Oakhaven Cemetery, Merrivale",null,["S003"])
+      ],
+      parentFamilyId:"F001", spouseFamilyIds:["F002"],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]},{sourceId:"S002", records:[R.marriage1901]},{sourceId:"S003", records:[R.burial, R.volumeIndex]}]
+    },
+    {
+      id:"I004", givenName:"Isolde", surname:"Ferrowfield", sex:"F",
+      birth:D("1881", 1881, "Ashbury, Northmoor"), death:D("1884", 1884, "Ashbury, Northmoor"),
+      lifeStory:[
+        "Isolde Ferrowfield was born in 1881 in Ashbury, the second child of Ambrose Ferrowfield and Rowena Calderwell. She died in 1884, aged three."
+      ],
+      timeline:[
+        E("BIRT","Birth","1881",1881,"Ashbury, Northmoor"),
+        E("DEAT","Death","1884",1884,"Ashbury, Northmoor","Aged 3")
+      ],
+      parentFamilyId:"F001", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sources:[]
+    },
+    {
+      id:"I005", givenName:"Lucian", surname:"Ferrowfield", sex:"M",
+      birth:D("1884", 1884, "Ashbury, Northmoor"), death:D("31 Jul 1917", 1917, "Ypres, Belgium"),
+      lifeStory:[
+        "Lucian Ferrowfield was born in 1884 in Ashbury, the youngest child of Ambrose Ferrowfield and Rowena Calderwell.",
+        "He had a relationship with Delphine Tarnley, with whom he had one son, Silas, born in Ashbury in 1912. No marriage was ever recorded for them.",
+        "Lucian enlisted with the Northmoor Fusiliers and was killed near Ypres on 31 July 1917, the opening day of the Third Battle of Ypres. He was thirty-three. He is commemorated on the Menin Gate."
+      ],
+      timeline:[
+        E("BIRT","Birth","1884",1884,"Ashbury, Northmoor"),
+        E("OCCU","Occupation","1911",1911,"Ashbury, Northmoor","Mason's labourer"),
+        E("_MILT","Military Service","1915",1915,null,"Northmoor Fusiliers"),
+        E("DEAT","Death","31 Jul 1917",1917,"Ypres, Belgium","Killed in action, aged 33",["S005"])
+      ],
+      parentFamilyId:"F001", spouseFamilyIds:["F003"],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S005", records:[R.warGrave]}]
+    },
+    {
+      id:"I006", givenName:"Clementine Verity", surname:"Bracewood", sex:"F",
+      birth:D("1880", 1880, "Merrivale, Northmoor"), death:D("1959", 1959, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Clementine Verity Bracewood was born in 1880 in Merrivale, the only child of Barnaby Bracewood, a cooper, and Marguerite Ashbury.",
+        "She married Nathaniel Hollis Ferrowfield in Merrivale in 1901 and they raised four children at 14 Kestrelby Row. Widowed in 1951, she remained in the city until her death in 1959, aged seventy-nine."
+      ],
+      timeline:[
+        E("BIRT","Birth","1880",1880,"Merrivale, Northmoor"),
+        E("MARR","Marriage","1901",1901,"Merrivale, Northmoor","to Nathaniel Hollis Ferrowfield",["S002"]),
+        E("RESI","Residence","1911",1911,"14 Kestrelby Row, Merrivale",null,["S001"]),
+        E("DEAT","Death","1959",1959,"Merrivale, Northmoor","Aged 79")
+      ],
+      parentFamilyId:"F005", spouseFamilyIds:["F002"],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]},{sourceId:"S002", records:[R.marriage1901]}]
+    },
+    {
+      id:"I007", givenName:"Tobias", surname:"Ferrowfield", sex:"M",
+      birth:D("1902", 1902, "Merrivale, Northmoor"), death:D("1978", 1978, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Tobias Ferrowfield was born in 1902 in Merrivale, the eldest child of Nathaniel Hollis Ferrowfield and Clementine Verity Bracewood. He appears as a boy of nine in the 1911 census of the family's Kestrelby Row household.",
+        "He married Adelaide Penhallow in 1930 and they had two children, Nathaniel and Isolde. He worked for the railways, as his father had, and died in Merrivale in 1978 aged seventy-six."
+      ],
+      timeline:[
+        E("BIRT","Birth","1902",1902,"Merrivale, Northmoor"),
+        E("RESI","Residence","1911",1911,"14 Kestrelby Row, Merrivale","Aged 9, at school",["S001"]),
+        E("MARR","Marriage","1930",1930,"Merrivale, Northmoor","to Adelaide Penhallow"),
+        E("DEAT","Death","1978",1978,"Merrivale, Northmoor","Aged 76")
+      ],
+      parentFamilyId:"F002", spouseFamilyIds:["F004"],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]}]
+    },
+    {
+      id:"I008", givenName:"Winifred", surname:"Ferrowfield", sex:"F",
+      birth:D("1904", 1904, "Merrivale, Northmoor"), death:D("1990", 1990, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Winifred Ferrowfield was born in 1904 in Merrivale, the second child of Nathaniel Hollis Ferrowfield and Clementine Verity Bracewood.",
+        "She entered the Sisters of Mercy in 1925 and taught for many years in Merrivale. She died in 1990, aged eighty-six."
+      ],
+      timeline:[
+        E("BIRT","Birth","1904",1904,"Merrivale, Northmoor"),
+        E("RESI","Residence","1911",1911,"14 Kestrelby Row, Merrivale","Aged 7",["S001"]),
+        E("EVEN","Religious Vows","1925",1925,"Merrivale, Northmoor","Sisters of Mercy"),
+        E("DEAT","Death","1990",1990,"Merrivale, Northmoor","Aged 86")
+      ],
+      parentFamilyId:"F002", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]}]
+    },
+    {
+      id:"I009", givenName:"Ambrose", surname:"Ferrowfield", sex:"M",
+      birth:D("1907", 1907, "Merrivale, Northmoor"), death:D("1963", 1963, "Liverpool, England"),
+      lifeStory:[
+        "Ambrose Ferrowfield was born in 1907 in Merrivale, named for his grandfather. He emigrated to Liverpool in the 1930s and worked on the docks there.",
+        "He died in Liverpool in 1963, aged fifty-six."
+      ],
+      timeline:[
+        E("BIRT","Birth","1907",1907,"Merrivale, Northmoor"),
+        E("RESI","Residence","1911",1911,"14 Kestrelby Row, Merrivale","Aged 4",["S001"]),
+        E("EMIG","Emigration","1934",1934,"Liverpool, England"),
+        E("DEAT","Death","1963",1963,"Liverpool, England","Aged 56")
+      ],
+      parentFamilyId:"F002", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]}]
+    },
+    {
+      id:"I010", givenName:"Rowena", surname:"Ferrowfield", sex:"F",
+      birth:D("1910", 1910, "Merrivale, Northmoor"), death:D("1995", 1995, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Rowena Ferrowfield was born in 1910 in Merrivale, the youngest child of Nathaniel Hollis Ferrowfield and Clementine Verity Bracewood, and was one year old at the time of the 1911 census.",
+        "She never married, kept house for her mother in later years, and died in Merrivale in 1995 at the age of eighty-five."
+      ],
+      timeline:[
+        E("BIRT","Birth","1910",1910,"Merrivale, Northmoor"),
+        E("RESI","Residence","1911",1911,"14 Kestrelby Row, Merrivale","Aged 1",["S001"]),
+        E("DEAT","Death","1995",1995,"Merrivale, Northmoor","Aged 85")
+      ],
+      parentFamilyId:"F002", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]}]
+    },
+    {
+      id:"I011", givenName:"Delphine", surname:"Tarnley", sex:"F",
+      birth:D("1886", 1886, "Ashbury, Northmoor"), death:D("1968", 1968, "Ashbury, Northmoor"),
+      lifeStory:[
+        "Delphine Tarnley was born in 1886 in Ashbury. She had a relationship with Lucian Ferrowfield, with whom she had a son, Silas, in 1912; no marriage was recorded.",
+        "Lucian was killed overseas in 1917 and Delphine raised the boy alone in Ashbury, where she died in 1968 aged eighty-two."
+      ],
+      timeline:[
+        E("BIRT","Birth","1886",1886,"Ashbury, Northmoor"),
+        E("DEAT","Death","1968",1968,"Ashbury, Northmoor","Aged 82")
+      ],
+      parentFamilyId:null, spouseFamilyIds:["F003"],
+      profilePhotoId:null, media:[], sourceIds:[]
+    },
+    {
+      id:"I012", givenName:"Silas Emmett", surname:"Ferrowfield", sex:"M",
+      birth:D("1912", 1912, "Ashbury, Northmoor"), death:D("1989", 1989, "Ashbury, Northmoor"),
+      lifeStory:[
+        "Silas Emmett Ferrowfield was born in Ashbury in 1912, the son of Lucian Ferrowfield and Delphine Tarnley. His father was killed overseas when Silas was five, and he was raised by his mother.",
+        "He worked as a carpenter in Ashbury and died there in 1989, aged seventy-seven."
+      ],
+      timeline:[
+        E("BIRT","Birth","1912",1912,"Ashbury, Northmoor"),
+        E("OCCU","Occupation","1935",1935,"Ashbury, Northmoor","Carpenter"),
+        E("DEAT","Death","1989",1989,"Ashbury, Northmoor","Aged 77")
+      ],
+      parentFamilyId:"F003", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sourceIds:[]
+    },
+    {
+      id:"I013", givenName:"Adelaide", surname:"Penhallow", sex:"F",
+      birth:D("1906", 1906, "Merrivale, Northmoor"), death:D("1991", 1991, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Adelaide Penhallow was born in Merrivale in 1906. She married Tobias Ferrowfield in 1930 and they had two children, Nathaniel and Isolde. She died in Merrivale in 1991, aged eighty-five."
+      ],
+      timeline:[
+        E("BIRT","Birth","1906",1906,"Merrivale, Northmoor"),
+        E("MARR","Marriage","1930",1930,"Merrivale, Northmoor","to Tobias Ferrowfield"),
+        E("DEAT","Death","1991",1991,"Merrivale, Northmoor","Aged 85")
+      ],
+      parentFamilyId:null, spouseFamilyIds:["F004"],
+      profilePhotoId:null, media:[], sourceIds:[]
+    },
+    {
+      id:"I014", givenName:"Nathaniel", surname:"Ferrowfield", sex:"M",
+      birth:D("1932", 1932, "Merrivale, Northmoor"), death:D("2011", 2011, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Nathaniel Ferrowfield was born in Merrivale in 1932, the elder child of Tobias Ferrowfield and Adelaide Penhallow, and was named for his grandfather. He died in 2011, aged seventy-nine."
+      ],
+      timeline:[
+        E("BIRT","Birth","1932",1932,"Merrivale, Northmoor"),
+        E("DEAT","Death","2011",2011,"Merrivale, Northmoor","Aged 79")
+      ],
+      parentFamilyId:"F004", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sourceIds:[]
+    },
+    {
+      id:"I015", givenName:"Isolde", surname:"Ferrowfield", sex:"F",
+      birth:D("1935", 1935, "Merrivale, Northmoor"), death:null,
+      lifeStory:[
+        "Isolde Ferrowfield was born in Merrivale in 1935, the younger child of Tobias Ferrowfield and Adelaide Penhallow."
+      ],
+      timeline:[
+        E("BIRT","Birth","1935",1935,"Merrivale, Northmoor")
+      ],
+      parentFamilyId:"F004", spouseFamilyIds:[],
+      profilePhotoId:null, media:[], sourceIds:[]
+    },
+    {
+      id:"I016", givenName:"Barnaby", surname:"Bracewood", sex:"M",
+      birth:D("1852", 1852, "Merrivale, Northmoor"), death:D("1919", 1919, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Barnaby Bracewood was born in Merrivale in 1852 and worked as a cooper in the city. He married Marguerite Ashbury in 1877; their only child, Clementine Verity, was born in 1880. He died in 1919, aged sixty-seven."
+      ],
+      timeline:[
+        E("BIRT","Birth","1852",1852,"Merrivale, Northmoor"),
+        E("MARR","Marriage","1877",1877,"Merrivale, Northmoor","to Marguerite Ashbury"),
+        E("OCCU","Occupation","1901",1901,"Merrivale, Northmoor","Cooper"),
+        E("DEAT","Death","1919",1919,"Merrivale, Northmoor","Aged 67")
+      ],
+      parentFamilyId:null, spouseFamilyIds:["F005"],
+      profilePhotoId:null, media:[], sourceIds:[]
+    },
+    {
+      id:"I017", givenName:"Marguerite", surname:"Ashbury", sex:"F",
+      birth:D("1858", 1858, "Merrivale, Northmoor"), death:D("1931", 1931, "Merrivale, Northmoor"),
+      lifeStory:[
+        "Marguerite Ashbury was born in Merrivale in 1858 and married Barnaby Bracewood, a cooper, in 1877. She died in Merrivale in 1931, aged seventy-three."
+      ],
+      timeline:[
+        E("BIRT","Birth","1858",1858,"Merrivale, Northmoor"),
+        E("MARR","Marriage","1877",1877,"Merrivale, Northmoor","to Barnaby Bracewood"),
+        E("DEAT","Death","1931",1931,"Merrivale, Northmoor","Aged 73")
+      ],
+      parentFamilyId:null, spouseFamilyIds:["F005"],
+      profilePhotoId:null, media:[], sourceIds:[]
+    }
+  ],
+
+  families: [
+    { id:"F001", husbandId:"I001", wifeId:"I002", childIds:["I003","I004","I005"],
+      events:[ E("MARR","Marriage","1876",1876,"Ashbury, Northmoor") ], sourceIds:["S004"] },
+    { id:"F002", husbandId:"I003", wifeId:"I006", childIds:["I007","I008","I009","I010"],
+      events:[ E("MARR","Marriage","1901",1901,"Merrivale, Northmoor",null,["S002"]) ], sourceIds:["S002"] },
+    /* No MARR event: the viewer must say "had a relationship with", never "married". */
+    { id:"F003", husbandId:"I005", wifeId:"I011", childIds:["I012"],
+      events:[], sourceIds:[] },
+    { id:"F004", husbandId:"I007", wifeId:"I013", childIds:["I014","I015"],
+      events:[ E("MARR","Marriage","1930",1930,"Merrivale, Northmoor") ], sourceIds:[] },
+    { id:"F005", husbandId:"I016", wifeId:"I017", childIds:["I006"],
+      events:[ E("MARR","Marriage","1877",1877,"Merrivale, Northmoor") ], sourceIds:[] }
+  ],
+
+  /* Bibliography only — who cites what, and with which page or transcription,
+     is on the people above. */
+  sources: [
+    { id:"S001", title:"1911 Northmoor Census", author:null, publication:null,
+      repository:"Northmoor Record Office" },
+    { id:"S002", title:"Marriage Registration Index", author:null, publication:null,
+      repository:"Northmoor General Register" },
+    { id:"S003", title:"Oakhaven Burial Records", author:null, publication:null,
+      repository:"Oakhaven Cemetery Trust" },
+    { id:"S004", title:"1901 Northmoor Census", author:null, publication:null,
+      repository:"Northmoor Record Office" },
+    { id:"S005", title:"Roll of Remembrance", author:null, publication:null,
+      repository:"Northmoor War Graves Board" }
+  ]
+};
+
+/* ============================================================================
+   Viewer — everything below reads TREE only, never the fixture's internals.
+   ========================================================================== */
+
+const SUPPORTED_SCHEMA = 1;
+
+/* Filled in by boot(): either a real bundle fetched from beside this page, or the
+   fictional fixture above. Nothing below this line knows or cares which. */
+let TREE, byId, famById, srcById, isSample = false;
+
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+const fullName = p => [p.givenName, p.surname].filter(Boolean).join(" ");
+const initials = p =>
+  ((p.givenName || "").trim()[0] || "") + ((p.surname || "").trim()[0] || "") || "?";
+const sexClass = p => p.sex === "M" ? "male" : p.sex === "F" ? "female" : "";
+
+/* "1878–1951", "b. 1935", "" when nothing is known. */
+function years(p) {
+  const b = p.birth && p.birth.year, d = p.death && p.death.year;
+  if (b && d) return b + "–" + d;
+  if (b) return "b. " + b;
+  if (d) return "d. " + d;
+  return "";
+}
+/* Age at death, the one derived number the header shows (cf. PersonVitals). */
+function ageAtDeath(p) {
+  const b = p.birth && p.birth.year, d = p.death && p.death.year;
+  return (b && d && d >= b) ? d - b : null;
+}
+const spouseIn = (fam, personId) =>
+  byId.get(fam.husbandId === personId ? fam.wifeId : fam.husbandId) || null;
+/* A spouse family is a marriage ONLY when it carries a MARR event. */
+const marriage = fam => fam.events.find(e => e.tag === "MARR") || null;
+
+/* ---- Sidebar ------------------------------------------------------------ */
+
+/* Alphabetical by surname initial, with a trailing "No surname" group —
+   the web counterpart of PersonSectioning in the Mac app. */
+function sections(people) {
+  const groups = new Map(), unnamed = [];
+  for (const p of people) {
+    const initial = (p.surname || "").trim()[0];
+    if (!initial) { unnamed.push(p); continue; }
+    const key = initial.toUpperCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  const sorter = (a, b) =>
+    (a.surname || "").localeCompare(b.surname || "") ||
+    (a.givenName || "").localeCompare(b.givenName || "") ||
+    ((a.birth && a.birth.year) || 0) - ((b.birth && b.birth.year) || 0);
+  const out = [...groups.keys()].sort().map(k => ({ label:k, people:groups.get(k).sort(sorter) }));
+  if (unnamed.length) out.push({ label:"No surname", people:unnamed.sort(sorter) });
+  return out;
+}
+
+function personRow(p, cls) {
+  return '<a class="' + cls + '" href="#' + esc(p.id) + '">' +
+           '<span class="mono sm ' + sexClass(p) + '">' + esc(initials(p)) + '</span>' +
+           '<span><span class="pname">' + esc(fullName(p)) + '</span>' +
+           '<div class="pyears">' + esc(years(p)) + '</div></span></a>';
+}
+
+function renderSidebar() {
+  const q = document.getElementById("searchBox").value.trim().toLowerCase();
+  const matches = q ? TREE.people.filter(p => fullName(p).toLowerCase().includes(q)) : TREE.people;
+  const nav = document.getElementById("peopleNav");
+  if (!matches.length) {
+    nav.innerHTML = '<div class="noresults">No one matches “' + esc(q) + '”.</div>';
+    return;
+  }
+  nav.innerHTML = sections(matches).map(sec =>
+    '<div class="group-label">' + esc(sec.label) + '</div>' +
+    sec.people.map(p => personRow(p, "prow" + (p.id === currentId ? " active" : ""))).join("")
+  ).join("");
+}
+
+/* ---- Detail ------------------------------------------------------------- */
+
+function renderHeader(p) {
+  const age = ageAtDeath(p);
+  const life = [years(p), age != null ? "aged " + age : null].filter(Boolean)
+                 .join(" &nbsp;·&nbsp; ");
+  const where = [
+    p.birth && p.birth.place ? "Born " + esc(p.birth.place) : null,
+    p.death && p.death.place ? "Died " + esc(p.death.place) : null
+  ].filter(Boolean).join(" &nbsp;·&nbsp; ");
+  return '<header class="idhead card">' +
+    '<span class="mono lg ' + sexClass(p) + '">' + esc(initials(p)) + '</span>' +
+    '<div><h2>' + esc(fullName(p)) + '</h2>' +
+    (life  ? '<div class="life">' + life + '</div>' : "") +
+    (where ? '<div class="whereline">' + where + '</div>' : "") +
+    '</div></header>';
+}
+
+/* Carded sections put their label inside the card, above its hairline, as on the
+   Mac app's Details page. Family and Sources are NOT carded: their contents are
+   already cards (person chips, one mini card per source), and wrapping cards in a
+   card just doubles the borders. */
+function block(label, inner, carded) {
+  return '<section class="block' + (carded ? " card" : "") + '">' +
+         '<p class="label">' + esc(label) + '</p>' + inner + '</section>';
+}
+
+function renderStory(p) {
+  if (!p.lifeStory || !p.lifeStory.length) return "";
+  return block("Life Story",
+    '<div class="story">' + p.lifeStory.map(t => "<p>" + esc(t) + "</p>").join("") + "</div>", true);
+}
+
+function renderTimeline(p) {
+  if (!p.timeline || !p.timeline.length) return "";
+  const rows = p.timeline.slice()
+    .sort((a, b) => (a.year || 9999) - (b.year || 9999))
+    .map(e =>
+      '<div class="tl"><div class="yr">' + esc(e.date || "") + '</div>' +
+      '<div class="ev"><b>' + esc(e.label) + '</b>' +
+      (e.place ? ' · <span class="place">' + esc(e.place) + '</span>' : "") + '</div>' +
+      (e.detail ? '<div class="note">' + esc(e.detail) + '</div>' : "") + '</div>')
+    .join("");
+  return block("Timeline", '<div class="timeline">' + rows + '</div>', true);
+}
+
+function chips(people) {
+  return '<div class="chips">' + people.map(p => personRow(p, "chip")).join("") + '</div>';
+}
+
+function renderFamily(p) {
+  let out = "";
+
+  const parentFam = p.parentFamilyId && famById.get(p.parentFamilyId);
+  if (parentFam) {
+    const parents = [parentFam.husbandId, parentFam.wifeId].map(id => byId.get(id)).filter(Boolean);
+    if (parents.length) out += '<div class="subhead">Parents</div>' + chips(parents);
+  }
+
+  for (const fid of p.spouseFamilyIds || []) {
+    const fam = famById.get(fid); if (!fam) continue;
+    const spouse = spouseIn(fam, p.id);
+    const marr = marriage(fam);
+    const who = spouse ? fullName(spouse) : "an unrecorded partner";
+    /* The MARR rule again, in the section head: married vs. a relationship. */
+    const heading = marr ? "Married " + esc(who) : "Relationship with " + esc(who);
+    const meta = marr
+      ? [marr.date, marr.place].filter(Boolean).join(", ")
+      : "no marriage recorded";
+    out += '<div class="subhead">' + heading +
+           ' <span class="union-meta">— ' + esc(meta) + '</span></div>';
+    if (spouse) out += chips([spouse]);
+
+    const kids = (fam.childIds || []).map(id => byId.get(id)).filter(Boolean);
+    if (kids.length) out += '<div class="subhead">Children</div>' + chips(kids);
+  }
+
+  if (!out) out = '<p class="thin">No family recorded for this person.</p>';
+  return block("Family", out);
+}
+
+/* A person carries their OWN records (schema v1: person.sources = [{sourceId,
+   records}]); sources[] is just the bibliography. Records used to hang off the
+   shared source, which meant a person citing a big national collection rendered
+   every record in the tree for it — see SCHEMA-v1.md. */
+function renderSources(p) {
+  const list = (p.sources || [])
+    .map(entry => ({ source: srcById.get(entry.sourceId), records: entry.records || [] }))
+    .filter(e => e.source);
+  /* block() escapes its label, so pass a plain ampersand — "&amp;" here rendered
+     as "SOURCES &AMP; RECORDS". */
+  if (!list.length) return block("Sources & Records",
+    '<p class="thin">No sources are cited for this person yet.</p>');
+  const cards = list.map(({ source: s, records }) =>
+    '<div class="source"><h3>' + esc(s.title || "Untitled source") + '</h3>' +
+    /* The Details page's subtitle is the source's author; repository is set on a
+       different subset. Plenty of sources carry the SAME string in both (every
+       Ancestry-imported one), so show each distinct value once. */
+    [...new Set([s.author, s.repository].filter(Boolean))]
+      .map(line => '<div class="repo">' + esc(line) + '</div>').join("") +
+    records.map(r => {
+      const link = r.url
+        ? '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">' +
+          esc(hostOf(r.url)) + ' ↗</a>' : "";
+      /* A citation can carry only a note — no page, no link. Say so plainly
+         rather than leaving a stray separator with nothing around it. */
+      const cite = r.page && link ? esc(r.page) + ' · ' + link
+                 : r.page ? esc(r.page)
+                 : link   ? link
+                 : '<span class="bare">Cited — no page or link</span>';
+      /* Notes and transcriptions are shown open — never behind a disclosure
+         triangle. The exporter pre-splits the "AI summary:" style label. */
+      const words = [
+        r.note ? '<div class="transcription">' +
+                 (r.note.label ? '<span class="note-label">' + esc(r.note.label) + '</span>' : "") +
+                 esc(r.note.body) + '</div>' : "",
+        r.text ? '<div class="transcription">' + esc(r.text) + '</div>' : ""
+      ].join("");
+      return '<div class="record"><div class="cite">' + cite + '</div>' + words + '</div>';
+    }).join("") +
+    '</div>').join("");
+  return block("Sources & Records", cards);
+}
+
+/* Bare host for a link label, e.g. "example.org". A malformed URL in the data
+   must not take the whole page down with it. */
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch (e) { return url; }
+}
+
+function renderFooter() {
+  const when = new Date(TREE.generatedAt).toLocaleDateString("en-GB",
+    { day:"numeric", month:"short", year:"numeric" });
+  return '<footer class="credit"><span>Imported from <b>' + esc(TREE.treeName) +
+         '</b> · ' + esc(when) + '</span>' +
+         (isSample ? '<span class="pill">sample data</span>' : "") +
+         '<span class="pill">bundle schema v' + esc(TREE.schemaVersion) + '</span></footer>';
+}
+
+/* ---- Routing ------------------------------------------------------------ */
+
+let currentId = null;
+
+function show(id) {
+  const p = byId.get(id) || byId.get(TREE.rootPersonId) || TREE.people[0];
+  currentId = p.id;
+  document.getElementById("sheet").innerHTML =
+    renderHeader(p) + renderStory(p) + renderTimeline(p) +
+    renderFamily(p) + renderSources(p) + renderFooter();
+  document.getElementById("detail").scrollTop = 0;
+  document.title = fullName(p) + " — " + TREE.treeName;
+  renderSidebar();
+}
+
+function routeFromHash() {
+  show((location.hash || "").replace(/^#/, "") || TREE.rootPersonId);
+}
+
+/* A bundle from a newer exporter is refused loudly rather than half-rendered. */
+function guard() {
+  if (TREE.schemaVersion === SUPPORTED_SCHEMA) return false;
+  document.querySelector(".app").innerHTML =
+    '<div class="guard"><h2>This bundle is a newer format</h2>' +
+    '<p>It was written as schema v' + esc(TREE.schemaVersion) + ', and this viewer reads v' +
+    SUPPORTED_SCHEMA + '. Update the viewer, or re-export from the Mac app.</p></div>';
+  return true;
+}
+
+/* ---- Boot ---------------------------------------------------------------
+   Loads a real `tree.json` sitting beside this page when there is one, and
+   otherwise falls back to the fictional fixture. That's how the same file both
+   demos on the iPad and drives a real 396-person export during development —
+   the real bundle stays OUTSIDE the repo (see NOTES.md, THE RULE), served over
+   http, because a file:// page can't fetch a sibling file.
+   The real PWA replaces this with an explicit import step (unzip → IndexedDB). */
+async function boot() {
+  let loaded = null;
+  try {
+    const res = await fetch("./tree.json", { cache: "no-store" });
+    if (res.ok) loaded = await res.json();
+  } catch (e) { /* no bundle beside us — expected on the published shell */ }
+
+  TREE = loaded || FIXTURE;
+  isSample = !loaded;
+  byId    = new Map(TREE.people.map(p => [p.id, p]));
+  famById = new Map(TREE.families.map(f => [f.id, f]));
+  srcById = new Map(TREE.sources.map(s => [s.id, s]));
+  start();
+}
+
+function start() {
+if (!guard()) {
+  document.getElementById("treeName").textContent = TREE.treeName;
+  document.getElementById("topTitle").textContent = TREE.treeName;
+  document.getElementById("treeSub").textContent =
+    TREE.people.length.toLocaleString() + " people · read-only";
+
+  const body = document.body;
+  const narrow = window.matchMedia("(max-width:700px)");
+  // Wide screens collapse the in-flow column; narrow screens slide an overlay in.
+  document.getElementById("menuBtn").addEventListener("click", () => {
+    body.classList.toggle(narrow.matches ? "nav-open" : "nav-collapsed");
+  });
+  document.getElementById("scrim").addEventListener("click", () => body.classList.remove("nav-open"));
+  document.getElementById("peopleNav").addEventListener("click", e => {
+    if (e.target.closest(".prow") && narrow.matches) body.classList.remove("nav-open");
+  });
+  document.getElementById("searchBox").addEventListener("input", renderSidebar);
+  window.addEventListener("hashchange", routeFromHash);
+
+  routeFromHash();
+}
+}
+
+boot();
+</script>
+</body>
+</html>

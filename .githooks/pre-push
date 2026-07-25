@@ -1,0 +1,61 @@
+#!/bin/sh
+# The last gate before anything leaves this machine. Scans every commit being
+# pushed — diffs AND messages — not just the latest one, because history is
+# published in full and a leak three commits back is just as public.
+#
+# Unlike pre-commit this FAILS CLOSED: no denylist means no push. A local commit
+# is recoverable; a push to GitHub is not.
+# See .githooks/README.md. Escape hatch: git push --no-verify
+
+. "$(git rev-parse --show-toplevel)/.githooks/guard.sh"
+
+if [ ! -s "$TERMS_FILE" ]; then
+  fail_banner
+  echo "  No denylist, so a push cannot be checked:"
+  echo "    $TERMS_FILE"
+  echo ""
+  echo "  Generate it (it is written outside the repo) with:"
+  echo "    swift run FamilyHistory --privacy-names"
+  exit 1
+fi
+
+status=0
+zero='0000000000000000000000000000000000000000'
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue          # branch deletion
+
+  if [ "$remote_sha" = "$zero" ]; then
+    # New branch: everything on it that isn't already on another remote branch.
+    range=$(git rev-list "$local_sha" --not --remotes | tail -1)
+    [ -n "$range" ] && range="$range^!..$local_sha" || range="$local_sha"
+    commits=$(git rev-list "$local_sha" --not --remotes)
+  else
+    commits=$(git rev-list "$remote_sha..$local_sha")
+  fi
+  [ -n "$commits" ] || continue
+
+  for sha in $commits; do
+    msg_hits=$(git log -1 --format='%s%n%b' "$sha" | guard_terms "message")
+    diff_hits=$(git show --format= --unified=0 "$sha" | grep '^+' | guard_terms "diff")
+    path_hits=$(git show --name-only --format= "$sha" | guard_paths)
+
+    if [ -n "$msg_hits" ] || [ -n "$diff_hits" ] || [ -n "$path_hits" ]; then
+      [ $status -eq 0 ] && fail_banner
+      echo "  $(git log -1 --format='%h %s' "$sha")"
+      [ -n "$msg_hits" ]  && printf "%s\n" "$msg_hits" | sed "s/^/    message: /"
+      [ -n "$diff_hits" ] && printf "%s\n" "$diff_hits" | sed "s/^/    diff:    /"
+      [ -n "$path_hits" ] && printf "%s\n" "$path_hits" | sed "s/^/    file:    /"
+      status=1
+    fi
+  done
+done
+
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "  Nothing was pushed. History can be rewritten while it is still local:"
+  echo "    git commit --amend        (the most recent commit)"
+  echo "    git rebase -i <sha>~1     (an older one)"
+fi
+
+exit $status

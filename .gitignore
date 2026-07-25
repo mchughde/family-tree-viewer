@@ -1,0 +1,11 @@
+# ⛔️ THE RULE: this repo carries the viewer SHELL only. Family tree content —
+# exported bundles, their JSON, their thumbnails — never enters it. The viewer
+# receives data by file import on the device, never from this site.
+*.familyweb
+tree.json
+img/
+*.ged
+*.gedcom
+*.sqlite*
+export/
+.DS_Store
