@@ -33,9 +33,18 @@ recorded marriage from an unmarried union), and sources with their records and
 transcriptions. All of it renders from a bundle-shaped object, so the sample and
 a real import take exactly the same path.
 
-Not built yet: the import step itself (file picker → unzip → IndexedDB), the
-service worker for true offline use, the web app manifest and icons, and photo
-and document display.
+Import is now real: the "Import a tree…" button reads a `.familyweb` file,
+unzips it in-page (a small hand-rolled zip reader — `DataView` + a built-in
+`DecompressionStream("deflate-raw")`, no library), and stores the tree and its
+images in IndexedDB, where they persist across visits. A stored tree always
+takes priority over the sample fixture; a wrong-schema or corrupt file is
+rejected with a plain-language message and the previous tree stays in place.
+Re-importing is a full replace, matching the schema's "no incremental sync"
+rule.
+
+Not built yet: the service worker for true offline use, the web app manifest
+and icons, and photo and document display (thumbnails are already stored in
+IndexedDB on import; nothing renders them yet).
 
 ## Layout
 
