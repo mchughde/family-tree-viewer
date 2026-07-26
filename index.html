@@ -1736,9 +1736,166 @@ async function storeBundle(tree, mediaEntries) {
   return importedAt;
 }
 
+/* Pure-JS raw DEFLATE (RFC 1951) decoder — a fallback for browsers with no
+   DecompressionStream. Safari only added that API in 16.4 (early 2023);
+   an iPadOS 15 device — plausibly the very iPad a relative is handed the
+   tree on — has no such thing and would otherwise fail every import with
+   "Can't find variable: DecompressionStream". Structured after the
+   canonical-Huffman decode technique in Mark Adler's public-domain
+   reference decompressor "puff.c": codes are read MSB-first, everything
+   else (extra bits, header fields) LSB-first — RFC 1951 §3.1.1 is explicit
+   that this asymmetry is intentional. Verified byte-for-byte against every
+   entry (tree.json and all 38 photos) of the real exported bundle before
+   this shipped; see the project scratchpad's inflate correctness test. */
+function inflateRawJS(input) {
+  let pos = 0, bitBuf = 0, bitCnt = 0;
+
+  function getBit() {
+    if (bitCnt === 0) { bitBuf = input[pos++]; bitCnt = 8; }
+    const b = bitBuf & 1;
+    bitBuf >>>= 1; bitCnt--;
+    return b;
+  }
+  function getBits(n) {
+    let v = 0;
+    for (let i = 0; i < n; i++) v |= getBit() << i;
+    return v;
+  }
+
+  // Canonical Huffman decode table: for each code length, the first code
+  // value at that length and the (already symbol-order) list of symbols
+  // sharing it — decode is then a simple range check per bit read.
+  function buildHuffman(lengths) {
+    let maxBits = 0;
+    for (const l of lengths) if (l > maxBits) maxBits = l;
+    const blCount = new Array(maxBits + 1).fill(0);
+    for (const l of lengths) if (l > 0) blCount[l]++;
+    const firstCode = new Array(maxBits + 1).fill(0);
+    let code = 0;
+    for (let bits = 1; bits <= maxBits; bits++) {
+      code = (code + blCount[bits - 1]) << 1;
+      firstCode[bits] = code;
+    }
+    const symbolsByLength = new Array(maxBits + 1).fill(null).map(() => []);
+    for (let sym = 0; sym < lengths.length; sym++) {
+      const l = lengths[sym];
+      if (l > 0) symbolsByLength[l].push(sym);
+    }
+    return { maxBits, blCount, firstCode, symbolsByLength };
+  }
+
+  function decodeSymbol(tree) {
+    let code = 0;
+    for (let len = 1; len <= tree.maxBits; len++) {
+      code = (code << 1) | getBit();
+      const count = tree.blCount[len];
+      if (count > 0) {
+        const offset = code - tree.firstCode[len];
+        if (offset >= 0 && offset < count) return tree.symbolsByLength[len][offset];
+      }
+    }
+    throw new Error("inflateRawJS: bad Huffman code");
+  }
+
+  function fixedLitTree() {
+    const l = new Array(288);
+    for (let i = 0; i <= 143; i++) l[i] = 8;
+    for (let i = 144; i <= 255; i++) l[i] = 9;
+    for (let i = 256; i <= 279; i++) l[i] = 7;
+    for (let i = 280; i <= 287; i++) l[i] = 8;
+    return buildHuffman(l);
+  }
+  function fixedDistTree() { return buildHuffman(new Array(30).fill(5)); }
+
+  const LEN_BASE = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+  const LEN_EXTRA = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+  const DIST_BASE = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+  const DIST_EXTRA = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+  const CL_ORDER = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
+
+  // Grown in chunks rather than element-by-element push() to keep this
+  // reasonable on an old device decoding a multi-hundred-KB photo.
+  let out = new Uint8Array(Math.max(input.length * 3, 1024));
+  let outLen = 0;
+  function ensure(extra) {
+    if (outLen + extra <= out.length) return;
+    let cap = out.length * 2;
+    while (cap < outLen + extra) cap *= 2;
+    const grown = new Uint8Array(cap);
+    grown.set(out.subarray(0, outLen));
+    out = grown;
+  }
+  function putByte(b) { ensure(1); out[outLen++] = b; }
+
+  let final = 0;
+  while (!final) {
+    final = getBit();
+    const type = getBits(2);
+    if (type === 0) {
+      bitCnt = 0; // discard the rest of the current byte; `pos` is already past it
+      const len = input[pos] | (input[pos + 1] << 8);
+      pos += 4; // LEN (2 bytes) + NLEN (2 bytes, ignored)
+      ensure(len);
+      out.set(input.subarray(pos, pos + len), outLen);
+      outLen += len; pos += len;
+    } else if (type === 1 || type === 2) {
+      let litTree, distTree;
+      if (type === 1) {
+        litTree = fixedLitTree(); distTree = fixedDistTree();
+      } else {
+        const hlit = getBits(5) + 257;
+        const hdist = getBits(5) + 1;
+        const hclen = getBits(4) + 4;
+        const clLengths = new Array(19).fill(0);
+        for (let i = 0; i < hclen; i++) clLengths[CL_ORDER[i]] = getBits(3);
+        const clTree = buildHuffman(clLengths);
+        const allLengths = [];
+        while (allLengths.length < hlit + hdist) {
+          const sym = decodeSymbol(clTree);
+          if (sym < 16) { allLengths.push(sym); }
+          else if (sym === 16) {
+            const rep = getBits(2) + 3, prev = allLengths[allLengths.length - 1];
+            for (let i = 0; i < rep; i++) allLengths.push(prev);
+          } else if (sym === 17) {
+            const rep = getBits(3) + 3;
+            for (let i = 0; i < rep; i++) allLengths.push(0);
+          } else {
+            const rep = getBits(7) + 11;
+            for (let i = 0; i < rep; i++) allLengths.push(0);
+          }
+        }
+        litTree = buildHuffman(allLengths.slice(0, hlit));
+        distTree = buildHuffman(allLengths.slice(hlit, hlit + hdist));
+      }
+      while (true) {
+        const sym = decodeSymbol(litTree);
+        if (sym < 256) { putByte(sym); }
+        else if (sym === 256) { break; }
+        else {
+          const li = sym - 257;
+          const length = LEN_BASE[li] + getBits(LEN_EXTRA[li]);
+          const dsym = decodeSymbol(distTree);
+          const dist = DIST_BASE[dsym] + getBits(DIST_EXTRA[dsym]);
+          ensure(length);
+          let start = outLen - dist;
+          for (let i = 0; i < length; i++) { out[outLen++] = out[start++]; }
+        }
+      }
+    } else {
+      throw new Error("inflateRawJS: bad block type");
+    }
+  }
+  return out.subarray(0, outLen);
+}
+
 async function inflateRaw(bytes) {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  // The fast path everywhere it exists; the hand-rolled decoder only runs
+  // on browsers old enough to lack the native API at all.
+  if (typeof DecompressionStream !== "undefined") {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  return inflateRawJS(bytes);
 }
 
 /* Walks the archive's directory table (not a streaming read of local entries)
