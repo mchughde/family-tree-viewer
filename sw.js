@@ -5,7 +5,7 @@
 // import and is untouched by this file. Bump SW_VERSION whenever any shell
 // file below changes, so returning visitors get the new version instead of
 // being stuck on a stale cached shell forever.
-const SW_VERSION = "v1";
+const SW_VERSION = "v2";
 const CACHE_NAME = `family-tree-shell-${SW_VERSION}`;
 const SHELL_PATHS = [
   "./",
