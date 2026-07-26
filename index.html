@@ -1908,7 +1908,14 @@ boot();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => { /* offline shell is a nicety, not a requirement */ });
+    // updateViaCache: "none" forces the browser to bypass HTTP cache when
+    // checking sw.js for updates. Without it, GitHub Pages' own caching
+    // (Cache-Control: max-age=600) can leave a browser comparing against a
+    // stale cached copy of sw.js forever, so it never notices a real change
+    // and no update ever installs — no amount of reloading the PAGE fixes
+    // that, since it's the update CHECK itself that's stuck.
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+      .catch(() => { /* offline shell is a nicety, not a requirement */ });
   });
 }
 </script>
