@@ -214,7 +214,6 @@
   .record .cite { font-size:13px; color:var(--secondary); }
   .record a { color:var(--accent); text-decoration:none; }
   .record a:hover { text-decoration:underline; }
-  .record .bare { font-style:italic; color:var(--muted); }
   .transcription {
     font-family:var(--serif); font-size:15px; line-height:1.55; color:var(--ink);
     margin-top:8px; padding:11px 14px; background:var(--page);
@@ -844,12 +843,13 @@ function renderSources(p) {
       const link = r.url
         ? '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">' +
           esc(hostOf(r.url)) + ' ↗</a>' : "";
-      /* A citation can carry only a note — no page, no link. Say so plainly
-         rather than leaving a stray separator with nothing around it. */
+      /* A citation can carry only a note, or nothing beyond the source itself —
+         still its own record (each is individually a piece of evidence), but with
+         no page or link there's nothing to show on this line. */
       const cite = r.page && link ? esc(r.page) + ' · ' + link
                  : r.page ? esc(r.page)
                  : link   ? link
-                 : '<span class="bare">Cited — no page or link</span>';
+                 : "";
       /* Notes and transcriptions are shown open — never behind a disclosure
          triangle. The exporter pre-splits the "AI summary:" style label. */
       const words = [
