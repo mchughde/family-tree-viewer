@@ -306,7 +306,7 @@
     position:absolute; display:flex; align-items:center; gap:8px; padding:7px;
     box-sizing:border-box; background:var(--card); border:1px solid var(--border);
     border-radius:9px; box-shadow:var(--shadow); text-align:left; cursor:pointer;
-    font-family:var(--sans); color:inherit;
+    font-family:var(--sans); color:inherit; overflow:hidden;
   }
   .xcard:hover { border-color:var(--accent); }
   /* The focus card glows in the claret accent; a married-in spouse gets a
@@ -1258,11 +1258,16 @@ let explorerZoom = 1;
 let currentExploreFocus = null;
 let wheelCommitTimer = null;
 
+/* Sits just outside the card, touching its edge, rather than straddling it —
+   a two-line wrapped name (a long given name, or the focus card's thicker
+   border eating into its content width) can run close enough to the edge
+   that a handle centred ON the border would land on top of the text. */
 function handleHtml(dir, personId, expanded, centerX, edgeY) {
   const size = 26;
+  const top = dir === "up" ? edgeY - size : edgeY;
   const glyph = expanded ? '<path d="M3 7h8"/>' : '<path d="M7 3v8M3 7h8"/>';
   return '<button type="button" class="xhandle' + (expanded ? " expanded" : "") + '" ' +
-    'style="left:' + (centerX - size / 2) + 'px; top:' + (edgeY - size / 2) + 'px;" ' +
+    'style="left:' + (centerX - size / 2) + 'px; top:' + top + 'px;" ' +
     'data-' + dir + '="' + esc(personId) + '" title="' + (expanded ? "Collapse" : "Expand") + '">' +
     '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
     glyph + '</svg></button>';
