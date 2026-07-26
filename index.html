@@ -13,6 +13,9 @@
 <meta name="theme-color" content="#F4EFE7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1F1C19" media="(prefers-color-scheme: dark)">
 <title>Family Tree — Viewer</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   :root {
     --page:#F4EFE7; --card:#FDFCF9; --ink:#2B2621; --secondary:#847A6F;
@@ -1145,6 +1148,12 @@ async function boot() {
 }
 
 boot();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => { /* offline shell is a nicety, not a requirement */ });
+  });
+}
 </script>
 </body>
 </html>
