@@ -185,7 +185,9 @@
   .tl .ev { font-size:15px; margin-top:1px; }
   .tl .ev b { font-weight:600; }
   .tl .ev .place { color:var(--secondary); }
-  .tl .note { color:var(--muted); font-size:14px; margin-top:2px; }
+  /* An event's note gets the same boxed "mini insert" treatment as a source's
+     transcription (.transcription, below) — both are free-text research notes,
+     and rendering one plain and one boxed read as inconsistent, not intentional. */
 
   /* ---- Family ---- */
   .subhead { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--secondary); margin:18px 0 8px; }
@@ -779,7 +781,7 @@ function renderTimeline(p) {
       '<div class="tl"><div class="yr">' + esc(e.date || "") + '</div>' +
       '<div class="ev"><b>' + esc(e.label) + '</b>' +
       (e.place ? ' · <span class="place">' + esc(e.place) + '</span>' : "") + '</div>' +
-      (e.detail ? '<div class="note">' + esc(e.detail) + '</div>' : "") + '</div>')
+      (e.detail ? '<div class="transcription">' + esc(e.detail) + '</div>' : "") + '</div>')
     .join("");
   return block("Timeline", '<div class="timeline">' + rows + '</div>', true);
 }
