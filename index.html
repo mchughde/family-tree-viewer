@@ -121,7 +121,10 @@
   /* A profile photo fills the same badge as the monogram it replaces — same
      ring, same size classes — so the header/list layout needs no branching. */
   .mono.photo { overflow:hidden; background:var(--card); }
-  .mono.photo img { width:100%; height:100%; object-fit:cover; display:block; }
+  /* Biased toward the top: a centred crop on a portrait photo (more torso
+     below the face than headroom above) reliably clips the forehead
+     otherwise — this isn't a per-photo fix, just a better blind default. */
+  .mono.photo img { width:100%; height:100%; object-fit:cover; object-position:50% 20%; display:block; }
 
   /* ---- Detail column ---- */
   .detail { overflow-y:auto; min-height:0; }
