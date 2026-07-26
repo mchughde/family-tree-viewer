@@ -260,6 +260,75 @@
     border-radius:9px; padding:7px 12px; display:inline-flex; align-items:center; gap:7px;
   }
   .menuBtn:hover { border-color:var(--accent); }
+  .viewToggle {
+    margin-left:auto; border:1px solid var(--border); background:var(--card); color:var(--ink);
+    font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer;
+    border-radius:9px; padding:7px 12px;
+  }
+  .viewToggle:hover { border-color:var(--accent); }
+
+  /* ---- Family Explorer ----
+     An hourglass centred on a focus person: ancestors fan up, descendants fan
+     down, each branch expanded/collapsed by tapping ⊕/⊖. Ported from the Mac
+     app's FamilyExplorer.swift (see pwa-viewer/DESIGN.md). Connectors are one
+     SVG path (crisp at any zoom); cards are plain buttons positioned in the
+     same unscaled coordinate space, so no separate hit-testing math is needed. */
+  .explore { display:none; flex:1 1 auto; min-height:0; flex-direction:column; }
+  body.explore-mode .detail { display:flex; flex-direction:column; overflow:hidden; }
+  body.explore-mode .sheet { display:none; }
+  body.explore-mode .explore { display:flex; }
+  .explore-toolbar {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:10px 14px; border-bottom:1px solid var(--border); flex:0 0 auto;
+  }
+  .explore-focus { font-size:13px; }
+  .explore-hint { font-size:12px; color:var(--muted); }
+  .spacer { flex:1 1 auto; }
+  .xbtn {
+    border:1px solid var(--border); background:var(--card); color:var(--ink);
+    font-family:var(--sans); font-size:13px; cursor:pointer; border-radius:8px;
+    padding:6px 11px; font-variant-numeric:tabular-nums;
+  }
+  .xbtn:hover:not(:disabled) { border-color:var(--accent); }
+  .xbtn:disabled { opacity:.4; cursor:default; }
+  .zoomPctBtn { min-width:52px; }
+  /* Native scroll (one-finger pan) is left entirely to the browser; JS only
+     intervenes for two-finger pinch and ctrl-wheel (trackpad pinch), both
+     `preventDefault()`ed explicitly so they don't fight the native pan. */
+  .explore-viewport {
+    flex:1 1 auto; min-height:0; overflow:auto; position:relative;
+    background:var(--page); -webkit-overflow-scrolling:touch; touch-action:pan-x pan-y;
+  }
+  .explore-sizer { position:relative; }
+  .explore-canvas { position:relative; transform-origin:top left; }
+  .explore-lines { position:absolute; top:0; left:0; }
+  .xcard {
+    position:absolute; display:flex; align-items:center; gap:8px; padding:7px;
+    box-sizing:border-box; background:var(--card); border:1px solid var(--border);
+    border-radius:9px; box-shadow:var(--shadow); text-align:left; cursor:pointer;
+    font-family:var(--sans); color:inherit;
+  }
+  .xcard:hover { border-color:var(--accent); }
+  /* The focus card glows in the claret accent; a married-in spouse gets a
+     dashed border — exactly the native ExplorerCard's rules. */
+  .xcard.focus { background:color-mix(in srgb, var(--accent) 10%, var(--card)); border-color:var(--accent); border-width:2px; }
+  .xcard.spouse { border-style:dashed; }
+  .xcard .bar { --tint:var(--neutral); width:3px; align-self:stretch; border-radius:1.5px; flex:0 0 auto; background:var(--tint); }
+  .xcard .bar.male { --tint:var(--male); }
+  .xcard .bar.female { --tint:var(--female); }
+  .xinfo { min-width:0; }
+  .xname {
+    font-size:13px; font-weight:600; line-height:1.25; display:-webkit-box;
+    -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .xyears { font-size:11px; color:var(--muted); margin-top:1px; font-variant-numeric:tabular-nums; }
+  .xhandle {
+    position:absolute; width:26px; height:26px; border-radius:50%;
+    background:var(--page); border:1px solid var(--border); display:grid; place-items:center;
+    cursor:pointer; color:var(--accent);
+  }
+  .xhandle.expanded { color:var(--muted); }
+  .xhandle:hover { border-color:var(--accent); }
 
   /* ---- Wide (iPad / desktop): sidebar is an in-flow column you can collapse ---- */
   @media (min-width:701px) {
@@ -318,8 +387,17 @@
         People
       </button>
       <span class="topttl" id="topTitle">Family Tree</span>
+      <button class="viewToggle" id="viewToggle" type="button"></button>
     </div>
     <div class="sheet" id="sheet"></div>
+    <div class="explore" id="explore">
+      <div class="explore-toolbar" id="exploreToolbar"></div>
+      <div class="explore-viewport" id="exploreViewport">
+        <div class="explore-sizer" id="exploreSizer">
+          <div class="explore-canvas" id="exploreCanvas"></div>
+        </div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -889,6 +967,492 @@ function renderFooter() {
          '<span class="pill">bundle schema v' + esc(TREE.schemaVersion) + '</span></footer>';
 }
 
+/* ============================================================================
+   Family Explorer — hourglass tree browsing, ported from FamilyExplorer.swift
+   / ExplorerExpansion.swift / ExplorerMetrics.swift (see DESIGN.md). No schema
+   change was needed: layout consumes only parentFamilyId, spouseFamilyIds →
+   childIds, husbandId/wifeId, and each person's own name/years/sex, all of
+   which tree.json already carries. Expansion is interactive, so — like the
+   Mac app — this is recomputed client-side rather than pre-baked by the
+   exporter; the exact node-placement recursion is mirrored line-for-line so
+   the two can't quietly drift apart.
+   ========================================================================== */
+
+function fatherOf(pid) {
+  const p = byId.get(pid);
+  const fam = p && p.parentFamilyId && famById.get(p.parentFamilyId);
+  return (fam && fam.husbandId && byId.get(fam.husbandId)) || null;
+}
+function motherOf(pid) {
+  const p = byId.get(pid);
+  const fam = p && p.parentFamilyId && famById.get(p.parentFamilyId);
+  return (fam && fam.wifeId && byId.get(fam.wifeId)) || null;
+}
+function parentsOf(pid) { return [fatherOf(pid), motherOf(pid)].filter(Boolean); }
+/* Chronological, first union first — spouseFamilyIds/childIds already carry
+   that order from the exporter (Family.chronologyKey / orderedChildren), so
+   there's no ordering logic to re-implement here, unlike the Mac app's
+   spouseFamiliesOrdered which computes it against live Core Data. */
+function spouseFamiliesOf(pid) {
+  const p = byId.get(pid);
+  return ((p && p.spouseFamilyIds) || []).map(fid => famById.get(fid)).filter(Boolean);
+}
+function childrenOfPerson(pid) {
+  const kids = [];
+  for (const fam of spouseFamiliesOf(pid)) for (const cid of (fam.childIds || [])) kids.push(cid);
+  return kids;
+}
+
+const ExplorerMetrics = {
+  cardWidth: 170, cardHeight: 54, columnStep: 200, rowStep: 120, pad: 40,
+  minZoom: 0.15, maxZoom: 2,
+  canvasSize(layout) {
+    const rows = layout.maxGeneration - layout.minGeneration;
+    return { width: layout.columns * this.columnStep + 2 * this.pad,
+             height: rows * this.rowStep + this.cardHeight + 2 * this.pad };
+  },
+  clamp(z) { return Math.min(Math.max(z, this.minZoom), this.maxZoom); },
+  step(z) { return Math.max(0.05, z * 0.25); },
+  fit(canvas, viewport) {
+    if (viewport.width <= 1 || viewport.height <= 1 || canvas.width <= 1 || canvas.height <= 1) return 1;
+    return this.clamp(Math.min(viewport.width / canvas.width, viewport.height / canvas.height, 1));
+  },
+};
+
+/* Builds the hourglass for `focusPersonId`: ancestors fanning up (generation
+   < 0), descendants fanning down (generation > 0), a person shown expanded
+   only if their id is in `expandedUp`/`expandedDown`. Descendants are placed
+   per FAMILY, not per person — a partner is drawn beside their co-parent and
+   that family's children hang beneath the couple — so a child never appears
+   to descend from one parent alone with no clue who the other was, and
+   someone with children by two partners gets one card per partner with the
+   right children under each. Faithful port of FamilyExplorer.build; see that
+   file for the reasoning behind each step. */
+function buildExplorerLayout(focusPersonId, expandedUp, expandedDown) {
+  const nodeById = new Map();
+  const edges = [];
+  let nextId = 0;
+
+  // ---- Ancestor pass (also creates the focus node at generation 0) ----
+  let upLeaf = 0;
+  function placeUp(pid, generation, visited) {
+    const parents = parentsOf(pid).filter(pp => !visited.has(pp.id));
+    const show = expandedUp.has(pid) && parents.length > 0;
+    let x;
+    const childIds = [];
+    if (show) {
+      const seen = new Set(visited); seen.add(pid);
+      const xs = [];
+      for (const parent of parents) {
+        const r = placeUp(parent.id, generation - 1, seen);
+        childIds.push(r.id); xs.push(r.x);
+      }
+      x = xs.reduce((a, b) => a + b, 0) / xs.length;
+    } else {
+      x = upLeaf; upLeaf += 1;
+    }
+    const id = nextId++;
+    nodeById.set(id, {
+      id, personId: pid, generation, x,
+      isFocus: generation === 0, isSpouse: false,
+      hasParents: parentsOf(pid).length > 0,
+      hasChildren: childrenOfPerson(pid).length > 0,
+    });
+    for (const c of childIds) edges.push({ from: id, to: c });
+    return { id, x };
+  }
+  const rootPlaced = placeUp(focusPersonId, 0, new Set());
+  const focusNodeId = rootPlaced.id, focusX = rootPlaced.x;
+
+  // ---- Descendant pass (does not re-create the focus; aligns under it) ----
+  let downLeaf = 0;
+  const downIds = [];
+
+  /* Draws a card for each partner and hangs each family's children beneath
+     the partner they were had with. Returns the column `personId_`'s own
+     card should occupy, just left of their first partner. */
+  function placeFamilies(personId_, nodeId, generation, seen, includeChildren, includeChildlessPartners) {
+    function visibleKids(fam) {
+      return includeChildren ? (fam.childIds || []).filter(cid => !seen.has(cid)) : [];
+    }
+    function visiblePartner(fam) {
+      const partnerId = fam.husbandId === personId_ ? fam.wifeId : fam.husbandId;
+      return (partnerId && !seen.has(partnerId)) ? partnerId : null;
+    }
+    const drawable = spouseFamiliesOf(personId_).filter(fam =>
+      visibleKids(fam).length > 0 || (includeChildlessPartners && visiblePartner(fam)));
+
+    // Children first, family by family, so each family's children stay a
+    // contiguous run of columns.
+    const startLeaf = downLeaf;
+    const groups = []; // { partnerId, kidIds, kidCentres }
+    for (const fam of drawable) {
+      const kidIds = [], kidCentres = [];
+      for (const kidId of visibleKids(fam)) {
+        const r = placeDown(kidId, generation + 1, seen);
+        kidIds.push(r.id); kidCentres.push(r.centre);
+      }
+      groups.push({ partnerId: visiblePartner(fam), kidIds, kidCentres });
+    }
+
+    // The person and every partner form one adjacent block centred over all
+    // the children, so a second partner's card can't fling clear across the
+    // chart once the first family's descendants are expanded.
+    const partnerCount = groups.filter(g => g.partnerId).length;
+    const blockWidth = 1 + partnerCount;
+    const allCentres = groups.flatMap(g => g.kidCentres);
+    let x;
+    if (allCentres.length === 0) {
+      x = downLeaf; downLeaf += blockWidth;
+    } else {
+      if (downLeaf - startLeaf < blockWidth) downLeaf = startLeaf + blockWidth;
+      const centre = allCentres.reduce((a, b) => a + b, 0) / allCentres.length;
+      x = Math.max(startLeaf, Math.min(centre - (blockWidth - 1) / 2, downLeaf - blockWidth));
+    }
+
+    // Attribution lives in the edges: each child links to the partner they
+    // were had with, so two families read as distinct fans even though the
+    // partner cards sit side by side.
+    let offset = 1;
+    for (const g of groups) {
+      if (!g.partnerId) {
+        for (const c of g.kidIds) edges.push({ from: nodeId, to: c });
+        continue;
+      }
+      const sid = nextId++;
+      downIds.push(sid);
+      nodeById.set(sid, {
+        id: sid, personId: g.partnerId, generation,
+        x: x + offset, isFocus: false, isSpouse: true,
+        hasParents: parentsOf(g.partnerId).length > 0,
+        hasChildren: childrenOfPerson(g.partnerId).length > 0,
+      });
+      edges.push({ from: nodeId, to: sid });                    // marriage bar
+      for (const c of g.kidIds) edges.push({ from: sid, to: c }); // …and their children
+      offset += 1;
+    }
+    return x;
+  }
+
+  /* Places `personId_` and, when expanded, everything hanging below them. */
+  function placeDown(personId_, generation, visited) {
+    const seen = new Set(visited); seen.add(personId_);
+    // Claim the id up front so this person's own children can link back to it.
+    const id = nextId++;
+    downIds.push(id);
+
+    let x;
+    if (expandedDown.has(personId_)) {
+      x = placeFamilies(personId_, id, generation, seen, true, false);
+    } else {
+      x = downLeaf; downLeaf += 1;
+    }
+
+    const remainingKids = childrenOfPerson(personId_).filter(cid => !seen.has(cid));
+    nodeById.set(id, {
+      id, personId: personId_, generation, x,
+      isFocus: false, isSpouse: false,
+      hasParents: parentsOf(personId_).length > 0,
+      hasChildren: remainingKids.length > 0,
+    });
+    return { id, centre: x };
+  }
+
+  // The focus goes through the same routine as everyone else, so "which
+  // children with whom" reads identically at every level. Its partners still
+  // show even when childless — long-standing focus-only behaviour.
+  const focusDownX = placeFamilies(focusPersonId, focusNodeId, 0, new Set([focusPersonId]),
+                                    expandedDown.has(focusPersonId), true);
+  // Slide the whole descendant block so it lines up under the column the
+  // ancestor pass already fixed for the focus.
+  const delta = focusX - focusDownX;
+  for (const id of downIds) { nodeById.get(id).x += delta; }
+
+  // Normalise so the leftmost column is 0.
+  const minX = Math.min(...[...nodeById.values()].map(n => n.x));
+  for (const n of nodeById.values()) n.x -= minX;
+
+  // ---- Group the downward edges into one bracket per family ----
+  const kidsByParent = new Map();
+  for (const e of edges) {
+    const ga = nodeById.get(e.from).generation, gb = nodeById.get(e.to).generation;
+    if (ga === gb) continue;
+    const parent = ga < gb ? e.from : e.to, child = ga < gb ? e.to : e.from;
+    if (!kidsByParent.has(parent)) kidsByParent.set(parent, []);
+    kidsByParent.get(parent).push(child);
+  }
+  /* The horizontal extent a bracket needs — its children plus the parent. */
+  function spanOf(parentId) {
+    const xs = (kidsByParent.get(parentId) || []).map(id => nodeById.get(id).x);
+    xs.push(nodeById.get(parentId).x);
+    return [Math.min(...xs), Math.max(...xs)];
+  }
+  const brackets = [];
+  const byGeneration = new Map();
+  for (const pid of kidsByParent.keys()) {
+    const gen = nodeById.get(pid).generation;
+    if (!byGeneration.has(gen)) byGeneration.set(gen, []);
+    byGeneration.get(gen).push(pid);
+  }
+  for (const [generation, parents] of byGeneration) {
+    const ordered = [...parents].sort((a, b) => (spanOf(a)[0] - spanOf(b)[0]) || (a - b));
+    // Ancestors never need lanes: a father and a mother both lead to the same
+    // child, so separating them would imply a distinction that isn't there.
+    if (generation < 0) {
+      for (const p of ordered) brackets.push({ id: p, children: [...kidsByParent.get(p)].sort((a, b) => a - b), lane: 0 });
+      continue;
+    }
+    // Greedy interval assignment: a family only leaves lane 0 when its span
+    // actually overlaps one already placed there.
+    const laneEnd = [];
+    for (const p of ordered) {
+      const [lo, hi] = spanOf(p);
+      let assigned = laneEnd.findIndex(e => e < lo);
+      if (assigned === -1) { assigned = laneEnd.length; laneEnd.push(hi); }
+      else laneEnd[assigned] = hi;
+      brackets.push({ id: p, children: [...kidsByParent.get(p)].sort((a, b) => a - b), lane: assigned });
+    }
+  }
+  brackets.sort((a, b) => a.id - b.id);
+
+  const nodes = [...nodeById.values()].sort((a, b) => a.id - b.id);
+  const gens = nodes.map(n => n.generation);
+  return {
+    nodes, edges, brackets,
+    minGeneration: Math.min(...gens),
+    maxGeneration: Math.max(...gens),
+    columns: Math.max(...nodes.map(n => n.x)) + 1,
+  };
+}
+
+/* Which branches are open, surviving a re-centre — the JS twin of
+   ExplorerExpansion. Kept as a plain module-level object, separate from
+   rendering, for the same reason the Swift original is a plain value type
+   held on AppState rather than view @State: re-centring on a neighbour
+   should keep the picture you built up, not collapse it. Sets are keyed by
+   PERSON id (tree.json ids), not by the layout's own per-build node ids. */
+const explorerState = {
+  up: new Set(), down: new Set(), lastFocus: null,
+  /* Re-centre on `id`: keep every branch already open, and expand the new
+     focus both ways — the long-standing default view. No-op if `id` is
+     already the focus, so merely revisiting Explore won't undo a collapse. */
+  focus(id) {
+    if (id === this.lastFocus) return;
+    this.lastFocus = id;
+    this.up.add(id); this.down.add(id);
+  },
+  toggleUp(id) { this.up.has(id) ? this.up.delete(id) : this.up.add(id); },
+  toggleDown(id) { this.down.has(id) ? this.down.delete(id) : this.down.add(id); },
+  isExpandedUp(id) { return this.up.has(id); },
+  isExpandedDown(id) { return this.down.has(id); },
+  collapseAll(id) { this.up = new Set([id]); this.down = new Set([id]); this.lastFocus = id; },
+  openBranchCount(id) {
+    let n = 0;
+    for (const x of this.up) if (x !== id) n++;
+    for (const x of this.down) if (x !== id) n++;
+    return n;
+  },
+};
+
+let explorerZoom = 1;
+let currentExploreFocus = null;
+let wheelCommitTimer = null;
+
+function handleHtml(dir, personId, expanded, centerX, edgeY) {
+  const size = 26;
+  const glyph = expanded ? '<path d="M3 7h8"/>' : '<path d="M7 3v8M3 7h8"/>';
+  return '<button type="button" class="xhandle' + (expanded ? " expanded" : "") + '" ' +
+    'style="left:' + (centerX - size / 2) + 'px; top:' + (edgeY - size / 2) + 'px;" ' +
+    'data-' + dir + '="' + esc(personId) + '" title="' + (expanded ? "Collapse" : "Expand") + '">' +
+    '<svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+    glyph + '</svg></button>';
+}
+
+/* Redraws the explorer at the current focus/expansion/zoom. Doesn't touch
+   the route — card taps navigate via location.hash (so they're a normal
+   history entry and reflect what's centred), but expand/collapse and zoom
+   are transient view state, exactly like the native toolbar/@State. */
+function renderExplorer() {
+  const focusId = currentExploreFocus;
+  explorerState.focus(focusId);
+  const layout = buildExplorerLayout(focusId, explorerState.up, explorerState.down);
+  const canvas = ExplorerMetrics.canvasSize(layout);
+  const viewportEl = document.getElementById("exploreViewport");
+  const viewport = { width: viewportEl.clientWidth, height: viewportEl.clientHeight };
+  const fit = ExplorerMetrics.fit(canvas, viewport);
+  const zoom = explorerZoom;
+  const openBranches = explorerState.openBranchCount(focusId);
+  const focusPerson = byId.get(focusId);
+
+  document.getElementById("exploreToolbar").innerHTML =
+    '<span class="explore-focus">Centred on <b>' + esc(fullName(focusPerson)) + '</b></span>' +
+    '<span class="explore-hint">Tap a card to go there · ⊕ / ⊖ to expand or collapse</span>' +
+    '<span class="spacer"></span>' +
+    '<button class="xbtn" type="button" data-cmd="collapse"' + (openBranches === 0 ? " disabled" : "") + '>Collapse</button>' +
+    '<button class="xbtn" type="button" data-cmd="zoom-out"' + (zoom <= ExplorerMetrics.minZoom + 0.001 ? " disabled" : "") + '>−</button>' +
+    '<button class="xbtn zoomPctBtn" type="button" id="zoomPct" data-cmd="zoom-reset">' + Math.round(zoom * 100) + '%</button>' +
+    '<button class="xbtn" type="button" data-cmd="zoom-in"' + (zoom >= ExplorerMetrics.maxZoom - 0.001 ? " disabled" : "") + '>+</button>' +
+    '<button class="xbtn" type="button" data-cmd="fit"' + (fit >= 0.999 ? " disabled" : "") + '>Fit</button>';
+
+  const m = ExplorerMetrics;
+  function centreOf(node) {
+    return {
+      x: m.pad + node.x * m.columnStep + m.cardWidth / 2,
+      y: m.pad + (node.generation - layout.minGeneration) * m.rowStep + m.cardHeight / 2,
+    };
+  }
+  const centres = new Map(layout.nodes.map(n => [n.id, centreOf(n)]));
+  const gen = new Map(layout.nodes.map(n => [n.id, n.generation]));
+
+  // Everything is one path, stroked once, so overlaps can't build up density
+  // the way separate strokes did.
+  let d = "";
+  for (const e of layout.edges) {
+    if (gen.get(e.from) !== gen.get(e.to)) continue;
+    const a = centres.get(e.from), b = centres.get(e.to);
+    if (!a || !b) continue;
+    // Marriage bar: connect the cards' facing edges, not their centres, so
+    // the line only spans the gap and never crosses a box.
+    const left = a.x <= b.x ? a : b, right = a.x <= b.x ? b : a;
+    d += "M" + (left.x + m.cardWidth / 2) + "," + left.y + "L" + (right.x - m.cardWidth / 2) + "," + right.y + " ";
+  }
+  for (const b of layout.brackets) {
+    const p = centres.get(b.id);
+    const kidPts = b.children.map(id => centres.get(id)).filter(Boolean);
+    if (!p || !kidPts.length) continue;
+    const top = { x: p.x, y: p.y + m.cardHeight / 2 };
+    const kidTopY = kidPts[0].y - m.cardHeight / 2;
+    // Stagger only as far as collisions demand; lane 0 keeps the familiar
+    // mid-gap turn.
+    const fraction = Math.min(0.34 + 0.20 * b.lane, 0.86);
+    const busY = top.y + (kidTopY - top.y) * fraction;
+    d += "M" + top.x + "," + top.y + "L" + top.x + "," + busY + " ";
+    const xs = kidPts.map(k => k.x).concat([top.x]);
+    d += "M" + Math.min(...xs) + "," + busY + "L" + Math.max(...xs) + "," + busY + " ";
+    for (const k of kidPts) d += "M" + k.x + "," + busY + "L" + k.x + "," + (k.y - m.cardHeight / 2) + " ";
+  }
+
+  const cardsHtml = layout.nodes.map(node => {
+    const p = byId.get(node.personId);
+    const c = centres.get(node.id);
+    const left = c.x - m.cardWidth / 2, top = c.y - m.cardHeight / 2;
+    const showUp = !node.isSpouse && node.generation <= 0 && node.hasParents;
+    const showDown = !node.isSpouse && node.generation >= 0 && node.hasChildren;
+    const cls = "xcard" + (node.isFocus ? " focus" : "") + (node.isSpouse ? " spouse" : "");
+    let html = '<button type="button" class="' + cls + '" style="left:' + left + 'px; top:' + top + 'px; ' +
+      'width:' + m.cardWidth + 'px; height:' + m.cardHeight + 'px;" data-nav="' + esc(p.id) + '">' +
+      '<span class="bar ' + (sexClass(p) || "") + '"></span>' +
+      '<span class="mono sm ' + sexClass(p) + '">' + esc(initials(p)) + '</span>' +
+      '<span class="xinfo"><span class="xname">' + esc(fullName(p)) + '</span>' +
+      (years(p) ? '<span class="xyears">' + esc(years(p)) + '</span>' : "") + '</span></button>';
+    if (showUp) html += handleHtml("up", p.id, explorerState.isExpandedUp(p.id), c.x, top);
+    if (showDown) html += handleHtml("down", p.id, explorerState.isExpandedDown(p.id), c.x, top + m.cardHeight);
+    return html;
+  }).join("");
+
+  document.getElementById("exploreCanvas").innerHTML =
+    '<svg class="explore-lines" width="' + canvas.width + '" height="' + canvas.height + '">' +
+    '<path d="' + d + '" fill="none" stroke="var(--connector)" stroke-width="1.5"/></svg>' + cardsHtml;
+
+  const sizer = document.getElementById("exploreSizer");
+  const inner = document.getElementById("exploreCanvas");
+  inner.style.width = canvas.width + "px";
+  inner.style.height = canvas.height + "px";
+  sizer.style.width = (canvas.width * zoom) + "px";
+  sizer.style.height = (canvas.height * zoom) + "px";
+  inner.style.transform = "scale(" + zoom + ")";
+}
+
+function touchDistance(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+/* Live-updates just the canvas transform during a pinch/wheel gesture,
+   skipping the full re-render so it stays smooth; the gesture's end commits
+   the value via a normal renderExplorer() (which also refreshes the zoom-%
+   toolbar button). Mirrors the native GestureState-onto-committed-zoom split. */
+function applyLiveZoom(zoom) {
+  explorerZoom = zoom;
+  const sizer = document.getElementById("exploreSizer");
+  const inner = document.getElementById("exploreCanvas");
+  const w = parseFloat(inner.style.width), h = parseFloat(inner.style.height);
+  sizer.style.width = (w * zoom) + "px";
+  sizer.style.height = (h * zoom) + "px";
+  inner.style.transform = "scale(" + zoom + ")";
+  const pct = document.getElementById("zoomPct");
+  if (pct) pct.textContent = Math.round(zoom * 100) + "%";
+}
+
+function wireExplorer() {
+  const el = document.getElementById("explore");
+  el.addEventListener("click", e => {
+    const nav = e.target.closest("[data-nav]");
+    if (nav) { location.hash = "explore/" + nav.dataset.nav; return; }
+    const up = e.target.closest("[data-up]");
+    if (up) { explorerState.toggleUp(up.dataset.up); renderExplorer(); return; }
+    const down = e.target.closest("[data-down]");
+    if (down) { explorerState.toggleDown(down.dataset.down); renderExplorer(); return; }
+    const cmd = e.target.closest("[data-cmd]");
+    if (!cmd || cmd.disabled) return;
+    if (cmd.dataset.cmd === "collapse") { explorerState.collapseAll(currentExploreFocus); renderExplorer(); return; }
+    if (cmd.dataset.cmd === "zoom-out") explorerZoom = ExplorerMetrics.clamp(explorerZoom - ExplorerMetrics.step(explorerZoom));
+    else if (cmd.dataset.cmd === "zoom-in") explorerZoom = ExplorerMetrics.clamp(explorerZoom + ExplorerMetrics.step(explorerZoom));
+    else if (cmd.dataset.cmd === "zoom-reset") explorerZoom = 1;
+    else if (cmd.dataset.cmd === "fit") {
+      const layout = buildExplorerLayout(currentExploreFocus, explorerState.up, explorerState.down);
+      const canvas = ExplorerMetrics.canvasSize(layout);
+      const viewportEl = document.getElementById("exploreViewport");
+      explorerZoom = ExplorerMetrics.fit(canvas, { width: viewportEl.clientWidth, height: viewportEl.clientHeight });
+    }
+    renderExplorer();
+  });
+
+  const viewportEl = document.getElementById("exploreViewport");
+  let pinchStartDist = null, pinchStartZoom = 1;
+  viewportEl.addEventListener("touchstart", e => {
+    if (e.touches.length === 2) { pinchStartDist = touchDistance(e.touches); pinchStartZoom = explorerZoom; }
+  }, { passive: true });
+  viewportEl.addEventListener("touchmove", e => {
+    if (e.touches.length === 2 && pinchStartDist) {
+      e.preventDefault();
+      applyLiveZoom(ExplorerMetrics.clamp(pinchStartZoom * (touchDistance(e.touches) / pinchStartDist)));
+    }
+  }, { passive: false });
+  const commitPinch = () => { if (pinchStartDist) { pinchStartDist = null; renderExplorer(); } };
+  viewportEl.addEventListener("touchend", commitPinch);
+  viewportEl.addEventListener("touchcancel", commitPinch);
+
+  // Trackpad pinch on a desktop browser arrives as a wheel event with ctrlKey set.
+  viewportEl.addEventListener("wheel", e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    applyLiveZoom(ExplorerMetrics.clamp(explorerZoom - e.deltaY * 0.01));
+    clearTimeout(wheelCommitTimer);
+    wheelCommitTimer = setTimeout(renderExplorer, 150);
+  }, { passive: false });
+
+  window.addEventListener("resize", () => {
+    if (document.body.classList.contains("explore-mode")) renderExplorer();
+  });
+}
+
+function showExplore(id) {
+  const p = byId.get(id) || byId.get(TREE.rootPersonId) || TREE.people[0];
+  currentId = p.id;
+  if (currentExploreFocus !== p.id) explorerZoom = 1;
+  currentExploreFocus = p.id;
+  document.body.classList.add("explore-mode");
+  document.getElementById("topTitle").textContent = fullName(p) + " — Explore";
+  document.getElementById("viewToggle").textContent = "Details";
+  document.getElementById("viewToggle").onclick = () => { location.hash = p.id; };
+  document.title = fullName(p) + " — " + TREE.treeName;
+  renderExplorer();
+  document.getElementById("detail").scrollTop = 0;
+  renderSidebar();
+}
+
 /* ---- Routing ------------------------------------------------------------ */
 
 let currentId = null;
@@ -896,16 +1460,22 @@ let currentId = null;
 function show(id) {
   const p = byId.get(id) || byId.get(TREE.rootPersonId) || TREE.people[0];
   currentId = p.id;
+  document.body.classList.remove("explore-mode");
   document.getElementById("sheet").innerHTML =
     renderHeader(p) + renderStory(p) + renderTimeline(p) +
     renderFamily(p) + renderSources(p) + renderFooter();
   document.getElementById("detail").scrollTop = 0;
   document.title = fullName(p) + " — " + TREE.treeName;
+  document.getElementById("topTitle").textContent = TREE.treeName;
+  document.getElementById("viewToggle").textContent = "Explore family";
+  document.getElementById("viewToggle").onclick = () => { location.hash = "explore/" + p.id; };
   renderSidebar();
 }
 
 function routeFromHash() {
-  show((location.hash || "").replace(/^#/, "") || TREE.rootPersonId);
+  const hash = (location.hash || "").replace(/^#/, "");
+  if (hash.indexOf("explore/") === 0) { showExplore(hash.slice(8) || TREE.rootPersonId); return; }
+  show(hash || TREE.rootPersonId);
 }
 
 /* A bundle from a newer exporter is refused loudly rather than half-rendered. */
@@ -1111,6 +1681,7 @@ function wireUI() {
   });
   document.getElementById("searchBox").addEventListener("input", renderSidebar);
   window.addEventListener("hashchange", routeFromHash);
+  wireExplorer();
 
   const fileInput = document.getElementById("importFile");
   document.getElementById("importBtn").addEventListener("click", () => fileInput.click());
