@@ -118,6 +118,10 @@
   .mono.lg { width:76px; height:76px; font-size:26px; }
   .mono.male   { --tint:var(--male); }
   .mono.female { --tint:var(--female); }
+  /* A profile photo fills the same badge as the monogram it replaces — same
+     ring, same size classes — so the header/list layout needs no branching. */
+  .mono.photo { overflow:hidden; background:var(--card); }
+  .mono.photo img { width:100%; height:100%; object-fit:cover; display:block; }
 
   /* ---- Detail column ---- */
   .detail { overflow-y:auto; min-height:0; }
@@ -228,6 +232,37 @@
     display:block; font-family:var(--sans); font-size:11px; letter-spacing:.07em;
     text-transform:uppercase; color:var(--muted); margin-bottom:6px;
   }
+
+  /* ---- Photos & Documents ---- */
+  .mgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(92px, 1fr)); gap:10px; }
+  .mtile {
+    position:relative; aspect-ratio:1; padding:0; border:1px solid var(--border);
+    border-radius:10px; overflow:hidden; background:var(--page); cursor:pointer;
+  }
+  .mtile:hover { border-color:var(--accent); }
+  .mtile img { width:100%; height:100%; object-fit:cover; display:block; }
+  .mbadge {
+    position:absolute; right:5px; bottom:5px; font-size:9.5px; font-weight:600;
+    letter-spacing:.04em; padding:2px 6px; border-radius:5px;
+    background:rgba(20,17,14,.62); color:#fff;
+  }
+
+  /* ---- Lightbox: tap a Photos & Documents tile for a full-size look ---- */
+  .lightbox {
+    position:fixed; inset:0; z-index:50; background:rgba(20,17,14,.72);
+    display:flex; align-items:center; justify-content:center; padding:5vh 5vw;
+  }
+  .lightbox[hidden] { display:none; }
+  .lightboxBody { max-width:min(90vw, 720px); max-height:90vh; display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .lightboxBody img { max-width:100%; max-height:72vh; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.4); }
+  .lightboxCaption { color:#F4EFE7; font-size:14px; text-align:center; }
+  .lightboxCaption a { color:#F4EFE7; text-decoration:underline; }
+  .lightboxClose {
+    position:absolute; top:18px; right:18px; width:38px; height:38px; border-radius:50%;
+    border:1px solid rgba(255,255,255,.35); background:rgba(20,17,14,.5); color:#fff;
+    font-size:18px; line-height:1; cursor:pointer;
+  }
+  .lightboxClose:hover { border-color:#fff; }
 
   footer.credit {
     margin-top:44px; padding-top:16px; border-top:1px solid var(--hairline);
@@ -401,6 +436,15 @@
   </main>
 </div>
 
+<!-- Full-size look at a Photos & Documents tile. -->
+<div class="lightbox" id="lightbox" hidden>
+  <button class="lightboxClose" id="lightboxClose" type="button" aria-label="Close">✕</button>
+  <div class="lightboxBody">
+    <img id="lightboxImg" alt="">
+    <div class="lightboxCaption" id="lightboxCaption"></div>
+  </div>
+</div>
+
 <script>
 /* ============================================================================
    FIXTURE — shaped exactly like the `tree.json` in ../SCHEMA-v1.md.
@@ -413,6 +457,27 @@ const D = (date, year, place) => ({ date, year, place });
 const E = (tag, label, date, year, place, detail, sourceIds) =>
   ({ tag, label, type:null, date, year, place:place || null,
      value:null, detail:detail || null, sourceIds:sourceIds || [] });
+
+/* Real bundles ship img/<id>.jpg files; the fixture has no bundle beside it,
+   so its `thumb` values are small inline SVGs instead — clearly a placeholder
+   mark, never dressed up to look like a real photo. Same code path renders
+   either: an <img> doesn't care whether its src is a data: URI or a blob: one. */
+const svgDataUri = svg => "data:image/svg+xml;base64," + btoa(svg);
+const PLACEHOLDER_PORTRAIT = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">' +
+  '<rect width="240" height="240" fill="#EFE2E4"/>' +
+  '<circle cx="120" cy="96" r="46" fill="#8A3D4D" opacity="0.55"/>' +
+  '<path d="M40 224c10-56 66-84 80-84s70 28 80 84z" fill="#8A3D4D" opacity="0.55"/>' +
+  '</svg>');
+const PLACEHOLDER_DOCUMENT = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">' +
+  '<rect width="240" height="240" fill="#FDFCF9"/>' +
+  '<rect x="34" y="24" width="172" height="192" rx="4" fill="#F4EFE7" stroke="#E7DFD0" stroke-width="2"/>' +
+  '<path d="M150 24v40h40z" fill="#E7DFD0"/>' +
+  '<g stroke="#C7BAA5" stroke-width="4" stroke-linecap="round">' +
+  '<line x1="56" y1="84" x2="184" y2="84"/><line x1="56" y1="106" x2="184" y2="106"/>' +
+  '<line x1="56" y1="128" x2="150" y2="128"/><line x1="56" y1="160" x2="184" y2="160"/>' +
+  '<line x1="56" y1="182" x2="150" y2="182"/></g></svg>');
 
 /* Records belong to the PEOPLE who cite them (schema v1), so they're named here
    and referenced from each person's `sources`. A household census record really
@@ -497,7 +562,14 @@ const FIXTURE = {
         E("BURI","Burial","1951",1951,"Oakhaven Cemetery, Merrivale",null,["S003"])
       ],
       parentFamilyId:"F001", spouseFamilyIds:["F002"],
-      profilePhotoId:null, media:[], sources:[{sourceId:"S001", records:[R.census1911]},{sourceId:"S002", records:[R.marriage1901]},{sourceId:"S003", records:[R.burial, R.volumeIndex]}]
+      profilePhotoId:"M0001",
+      media:[
+        { id:"M0001", form:"image", thumb:PLACEHOLDER_PORTRAIT, fullURL:null,
+          caption:"Nathaniel Hollis Ferrowfield, c. 1910 (placeholder)", kind:"portrait", width:240, height:240, pages:null },
+        { id:"M0002", form:"pdf", thumb:PLACEHOLDER_DOCUMENT, fullURL:"https://example.org/census",
+          caption:"1911 census return (placeholder)", kind:"document", width:240, height:240, pages:4 }
+      ],
+      sources:[{sourceId:"S001", records:[R.census1911]},{sourceId:"S002", records:[R.marriage1901]},{sourceId:"S003", records:[R.burial, R.volumeIndex]}]
     },
     {
       id:"I004", givenName:"Isolde", surname:"Ferrowfield", sex:"F",
@@ -773,6 +845,53 @@ const spouseIn = (fam, personId) =>
 /* A spouse family is a marriage ONLY when it carries a MARR event. */
 const marriage = fam => fam.events.find(e => e.tag === "MARR") || null;
 
+/* ---- Media: resolving a `thumb` path to something an <img> can load. An
+   imported bundle's images live as Blobs in IndexedDB, keyed by their path
+   inside the .familyweb (openDB/idbGet are defined down in Import); the dev
+   tree.json path and the fixture just use an ordinary URL — a sibling img/
+   file, or a data: URI — that the browser fetches directly. Same rendering
+   code handles either; callers never know which. */
+let mediaDB = null;
+const mediaCache = new Map(); // path -> resolved src (blob: URL or the original path)
+
+async function resolveMediaSrc(path) {
+  if (mediaCache.has(path)) return mediaCache.get(path);
+  let src = path;
+  try {
+    if (!mediaDB) mediaDB = await openDB();
+    const blob = await idbGet(mediaDB, "media", path);
+    if (blob) src = URL.createObjectURL(blob);
+  } catch (e) { /* IndexedDB unavailable — fall back to the raw path */ }
+  mediaCache.set(path, src);
+  return src;
+}
+
+/* Call after inserting any HTML that may contain `<img data-media-path>` —
+   resolves each one and swaps it in. Runs after the fact (rather than
+   inline) because IndexedDB is async and the rest of the app renders
+   synchronously via innerHTML. A load failure (a stale blob: URL from a
+   since-replaced import, say) demotes a header/list avatar back to its
+   monogram rather than showing a broken-image glyph. */
+function hydrateMedia(container) {
+  container.querySelectorAll("img[data-media-path]").forEach(img => {
+    resolveMediaSrc(img.dataset.mediaPath).then(src => { img.src = src; }).catch(() => {});
+    img.addEventListener("error", () => {
+      const mono = img.closest(".mono.photo");
+      if (mono) { mono.classList.remove("photo"); mono.textContent = mono.dataset.fallback || "?"; }
+    }, { once: true });
+  });
+}
+
+/* A profile photo fills the same badge the monogram would, at whatever size
+   class the caller wants — the header's "lg" and the sidebar's "sm" share
+   this one path, so a person's photo shows everywhere their initials would. */
+function avatarHtml(p, sizeClass) {
+  const photo = p.profilePhotoId && (p.media || []).find(m => m.id === p.profilePhotoId);
+  if (!photo) return '<span class="mono ' + sizeClass + ' ' + sexClass(p) + '">' + esc(initials(p)) + '</span>';
+  return '<span class="mono ' + sizeClass + ' ' + sexClass(p) + ' photo" data-fallback="' + esc(initials(p)) + '">' +
+    '<img data-media-path="' + esc(photo.thumb) + '" alt=""></span>';
+}
+
 /* ---- Sidebar ------------------------------------------------------------ */
 
 /* Alphabetical by surname initial, with a trailing "No surname" group —
@@ -797,7 +916,7 @@ function sections(people) {
 
 function personRow(p, cls) {
   return '<a class="' + cls + '" href="#' + esc(p.id) + '">' +
-           '<span class="mono sm ' + sexClass(p) + '">' + esc(initials(p)) + '</span>' +
+           avatarHtml(p, "sm") +
            '<span><span class="pname">' + esc(fullName(p)) + '</span>' +
            '<div class="pyears">' + esc(years(p)) + '</div></span></a>';
 }
@@ -814,6 +933,7 @@ function renderSidebar() {
     '<div class="group-label">' + esc(sec.label) + '</div>' +
     sec.people.map(p => personRow(p, "prow" + (p.id === currentId ? " active" : ""))).join("")
   ).join("");
+  hydrateMedia(nav);
 }
 
 /* ---- Detail ------------------------------------------------------------- */
@@ -827,7 +947,7 @@ function renderHeader(p) {
     p.death && p.death.place ? "Died " + esc(p.death.place) : null
   ].filter(Boolean).join(" &nbsp;·&nbsp; ");
   return '<header class="idhead card">' +
-    '<span class="mono lg ' + sexClass(p) + '">' + esc(initials(p)) + '</span>' +
+    avatarHtml(p, "lg") +
     '<div><h2>' + esc(fullName(p)) + '</h2>' +
     (life  ? '<div class="life">' + life + '</div>' : "") +
     (where ? '<div class="whereline">' + where + '</div>' : "") +
@@ -899,6 +1019,53 @@ function renderFamily(p) {
 
   if (!out) out = '<p class="thin">No family recorded for this person.</p>';
   return block("Family", out);
+}
+
+/* Mirrors the native "Photos & Documents" grid: every attachment, in the
+   order the exporter emits them (Person.attachmentList — oldest first). A
+   PDF's thumb is already a rendered first page (SCHEMA-v1.md), so it's shown
+   exactly like a photo, just badged so "first page" reads as a first page
+   and not the whole document. Tapping a tile opens it larger in the
+   lightbox (wired in wireUI) rather than the native app's "open externally",
+   since a read-only web viewer has nowhere else to open it to. */
+function renderMedia(p) {
+  if (!p.media || !p.media.length) return "";
+  const tiles = p.media.map(m =>
+    '<button type="button" class="mtile" data-full="' + esc(m.fullURL || "") + '" ' +
+    'data-caption="' + esc(m.caption || "") + '" data-pages="' + esc(m.pages || "") + '" data-form="' + esc(m.form) + '">' +
+    '<img data-media-path="' + esc(m.thumb) + '" alt="' + esc(m.caption || "") + '">' +
+    (m.form === "pdf" ? '<span class="mbadge">PDF</span>' : "") +
+    '</button>'
+  ).join("");
+  return block("Photos & Documents", '<div class="mgrid">' + tiles + '</div>', true);
+}
+
+function openLightbox(tile) {
+  const tileImg = tile.querySelector("img");
+  const img = document.getElementById("lightboxImg");
+  img.src = tileImg.src;
+  img.alt = tileImg.alt;
+  const bits = [];
+  if (tile.dataset.caption) bits.push(esc(tile.dataset.caption));
+  if (tile.dataset.form === "pdf" && tile.dataset.pages) bits.push("First page of " + esc(tile.dataset.pages));
+  if (tile.dataset.full) bits.push('<a href="' + esc(tile.dataset.full) + '" target="_blank" rel="noopener">Open original ↗</a>');
+  document.getElementById("lightboxCaption").innerHTML = bits.join(" &nbsp;·&nbsp; ");
+  document.getElementById("lightbox").hidden = false;
+}
+function closeLightbox() { document.getElementById("lightbox").hidden = true; }
+
+function wireLightbox() {
+  document.getElementById("sheet").addEventListener("click", e => {
+    const tile = e.target.closest(".mtile");
+    if (tile) openLightbox(tile);
+  });
+  document.getElementById("lightboxClose").addEventListener("click", closeLightbox);
+  document.getElementById("lightbox").addEventListener("click", e => {
+    if (e.target.id === "lightbox") closeLightbox();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !document.getElementById("lightbox").hidden) closeLightbox();
+  });
 }
 
 /* A person carries their OWN records (schema v1: person.sources = [{sourceId,
@@ -1466,9 +1633,11 @@ function show(id) {
   const p = byId.get(id) || byId.get(TREE.rootPersonId) || TREE.people[0];
   currentId = p.id;
   document.body.classList.remove("explore-mode");
-  document.getElementById("sheet").innerHTML =
+  const sheet = document.getElementById("sheet");
+  sheet.innerHTML =
     renderHeader(p) + renderStory(p) + renderTimeline(p) +
-    renderFamily(p) + renderSources(p) + renderFooter();
+    renderMedia(p) + renderFamily(p) + renderSources(p) + renderFooter();
+  hydrateMedia(sheet);
   document.getElementById("detail").scrollTop = 0;
   document.title = fullName(p) + " — " + TREE.treeName;
   document.getElementById("topTitle").textContent = TREE.treeName;
@@ -1643,6 +1812,12 @@ async function importBundle(file) {
       mediaEntries.push([name, new Blob([data], { type: mimeFor(name) })]);
     }
     const importedAt = await storeBundle(tree, mediaEntries);
+    // A re-import fully replaces the "media" store (storeBundle already
+    // cleared it), so any blob: URLs already handed to <img> tags now point
+    // at nothing — drop the resolver cache so the next render re-resolves
+    // against the new bundle instead of an object URL from the old one.
+    for (const src of mediaCache.values()) { if (src.startsWith("blob:")) URL.revokeObjectURL(src); }
+    mediaCache.clear();
 
     applyTree(tree, false, importedAt);
     renderApp();
@@ -1687,6 +1862,7 @@ function wireUI() {
   document.getElementById("searchBox").addEventListener("input", renderSidebar);
   window.addEventListener("hashchange", routeFromHash);
   wireExplorer();
+  wireLightbox();
 
   const fileInput = document.getElementById("importFile");
   document.getElementById("importBtn").addEventListener("click", () => fileInput.click());
