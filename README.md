@@ -27,27 +27,39 @@ re-checks every commit in the range at push time.
 
 ## Status
 
-Working: the person list with search and surname grouping, the identity header,
-generated life-story prose, the timeline, family relationships (distinguishing a
-recorded marriage from an unmarried union), and sources with their records and
-transcriptions. All of it renders from a bundle-shaped object, so the sample and
-a real import take exactly the same path.
+The originally-scoped feature set is complete. Working: the person list with
+search and surname grouping, the identity header (with a profile photo when
+one's set, falling back to initials), generated life-story prose, the
+timeline, family relationships (distinguishing a recorded marriage from an
+unmarried union), sources with their records and transcriptions, a "Photos &
+Documents" gallery with a lightbox for every attached photo/PDF, and an
+interactive **Family Explorer** — an hourglass tree centred on a focus person,
+ancestors above and descendants below, that you expand and collapse by
+tapping. All of it renders from a bundle-shaped object, so the sample and a
+real import take exactly the same path.
 
-Import is now real: the "Import a tree…" button reads a `.familyweb` file,
-unzips it in-page (a small hand-rolled zip reader — `DataView` + a built-in
-`DecompressionStream("deflate-raw")`, no library), and stores the tree and its
-images in IndexedDB, where they persist across visits. A stored tree always
-takes priority over the sample fixture; a wrong-schema or corrupt file is
-rejected with a plain-language message and the previous tree stays in place.
-Re-importing is a full replace, matching the schema's "no incremental sync"
-rule.
+Import: the "Import a tree…" button reads a `.familyweb`/`.zip` file, unzips
+it in-page (a small hand-rolled zip reader — `DataView` walking the archive's
+directory table, no library), and stores the tree and its images in IndexedDB,
+where they persist across visits. Decompression prefers the native
+`DecompressionStream("deflate-raw")` but falls back to a hand-rolled pure-JS
+RFC 1951 decoder on browsers that lack it entirely (iPadOS 15 and earlier —
+confirmed on a real device), so an older iPad isn't locked out. A stored tree
+always takes priority over the sample fixture; a wrong-schema or corrupt file
+is rejected with a plain-language message and the previous tree stays in
+place. Re-importing is a full replace, matching the schema's "no incremental
+sync" rule.
 
-Not built yet: the service worker for true offline use, the web app manifest
-and icons, and photo and document display (thumbnails are already stored in
-IndexedDB on import; nothing renders them yet).
+Installable and offline-capable: a web app manifest + icon set, and a service
+worker that caches the app shell so it opens with no network once visited.
+
+Nothing is currently queued.
 
 ## Layout
 
 - `index.html` — the whole viewer, self-contained: no build step, no dependencies,
   no external requests.
+- `sw.js` — the service worker (app-shell offline caching).
+- `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` —
+  installability.
 - `.githooks/` — the privacy guard.
