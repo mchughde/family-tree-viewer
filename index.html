@@ -175,7 +175,13 @@
     width:var(--spine); background:var(--hairline);
   }
   .tl:last-child::after { content:none; }
-  .tl .yr { font-size:13px; line-height:1.5; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tl .yr {
+    /* Always reserves a line box, even for an undated event (empty text) —
+       an empty block collapses to 0 height, which would silently invalidate
+       --dot-top above and drop every dot/spine on that row out of place. */
+    min-height:calc(13px * 1.5);
+    font-size:13px; line-height:1.5; color:var(--muted); font-variant-numeric:tabular-nums;
+  }
   .tl .ev { font-size:15px; margin-top:1px; }
   .tl .ev b { font-weight:600; }
   .tl .ev .place { color:var(--secondary); }
