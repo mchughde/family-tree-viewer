@@ -1641,7 +1641,7 @@ function show(id) {
   const sheet = document.getElementById("sheet");
   sheet.innerHTML =
     renderHeader(p) + renderStory(p) + renderTimeline(p) +
-    renderMedia(p) + renderFamily(p) + renderSources(p) + renderFooter();
+    renderFamily(p) + renderSources(p) + renderMedia(p) + renderFooter();
   hydrateMedia(sheet);
   document.getElementById("detail").scrollTop = 0;
   document.title = fullName(p) + " — " + TREE.treeName;
