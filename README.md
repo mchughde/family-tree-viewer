@@ -27,16 +27,23 @@ re-checks every commit in the range at push time.
 
 ## Status
 
-The originally-scoped feature set is complete. Working: the person list with
-search and surname grouping, the identity header (with a profile photo when
-one's set, falling back to initials), generated life-story prose, the
-timeline, family relationships (distinguishing a recorded marriage from an
-unmarried union), sources with their records and transcriptions, a "Photos &
-Documents" gallery with a lightbox for every attached photo/PDF, and an
-interactive **Family Explorer** — an hourglass tree centred on a focus person,
-ancestors above and descendants below, that you expand and collapse by
-tapping. All of it renders from a bundle-shaped object, so the sample and a
-real import take exactly the same path.
+The originally-scoped feature set is complete, plus one addition since.
+Working: the person list with search and surname grouping, the identity
+header (with a profile photo when one's set, falling back to initials),
+generated life-story prose, the timeline, family relationships (distinguishing
+a recorded marriage from an unmarried union), sources with their records and
+transcriptions, a "Photos & Documents" gallery with a lightbox for every
+attached photo/PDF, and an interactive **Family Explorer** — an hourglass tree
+centred on a focus person, ancestors above and descendants below, that you
+expand and collapse by tapping. All of it renders from a bundle-shaped
+object, so the sample and a real import take exactly the same path.
+
+A house-icon toggle on any person's header lets you mark "this is you"; every
+other page then shows how they relate to you — "Your grandmother", "Your
+first cousin once removed", "Your daughter-in-law", and so on — computed
+client-side from the same family graph the Explorer uses. The choice is
+stored on-device (not part of the imported bundle), so it carries over across
+visits and survives re-importing a refreshed tree.
 
 Import: the "Import a tree…" button reads a `.familyweb`/`.zip` file, unzips
 it in-page (a small hand-rolled zip reader — `DataView` walking the archive's
