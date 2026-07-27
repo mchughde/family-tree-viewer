@@ -145,6 +145,17 @@
   .idhead h2 { margin:0; font-size:27px; line-height:1.12; letter-spacing:-.01em; text-wrap:balance; }
   .idhead .life { color:var(--secondary); font-size:16px; margin-top:5px; font-variant-numeric:tabular-nums; }
   .idhead .whereline { color:var(--muted); font-size:14px; margin-top:3px; }
+  .idhead .relation { color:var(--accent); font-size:14px; font-weight:600; margin-top:7px; }
+
+  /* "Set as home" toggle: pushed to the header's far side (Spacer + Button,
+     as in the native app), same round icon-button footprint as menuBtn. */
+  .home-toggle {
+    margin-left:auto; flex:0 0 auto; width:34px; height:34px; display:grid; place-items:center;
+    border:1px solid var(--border); background:var(--card); color:var(--secondary);
+    border-radius:9px; cursor:pointer;
+  }
+  .home-toggle:hover { border-color:var(--accent); color:var(--accent); }
+  .home-toggle.active { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
 
   /* Cards carry their own visual separation, so the old 34px gap between bare
      sections is now too much air. */
@@ -824,6 +835,12 @@ const SUPPORTED_SCHEMA = 1;
    fictional fixture above. Nothing below this line knows or cares which. */
 let TREE, byId, famById, srcById, isSample = false;
 
+/* Who "you" are, for the "Your grandmother" / "This is you" line on the
+   Details page — a per-device preference (IndexedDB kv/"homePersonId"), not
+   part of the exported bundle, so it survives a re-import untouched (import
+   only overwrites the "tree"/"importedAt" keys). Loaded once at boot. */
+let homePersonId = null;
+
 const esc = s => String(s == null ? "" : s)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
@@ -943,6 +960,13 @@ function renderSidebar() {
 
 /* ---- Detail ------------------------------------------------------------- */
 
+/* Simple house glyph, outline (not home / not you) or filled (home person). */
+function houseIcon(filled) {
+  return filled
+    ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 1.4l6.5 5.4v7.2a.5.5 0 0 1-.5.5h-3.5a.5.5 0 0 1-.5-.5V10.5a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v3.5a.5.5 0 0 1-.5.5H2a.5.5 0 0 1-.5-.5V6.8z"/></svg>'
+    : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 7l6-5 6 5"/><path d="M3.5 6.3V14h9V6.3"/><path d="M6.5 14v-3.5a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1V14"/></svg>';
+}
+
 function renderHeader(p) {
   const age = ageAtDeath(p);
   const life = [years(p), age != null ? "aged " + age : null].filter(Boolean)
@@ -951,12 +975,23 @@ function renderHeader(p) {
     p.birth && p.birth.place ? "Born " + esc(p.birth.place) : null,
     p.death && p.death.place ? "Died " + esc(p.death.place) : null
   ].filter(Boolean).join(" &nbsp;·&nbsp; ");
+  const isHome = homePersonId != null && homePersonId === p.id;
+  const relation = homeRelationshipPhrase(p.id, homePersonId);
   return '<header class="idhead card">' +
     avatarHtml(p, "lg") +
     '<div><h2>' + esc(fullName(p)) + '</h2>' +
     (life  ? '<div class="life">' + life + '</div>' : "") +
     (where ? '<div class="whereline">' + where + '</div>' : "") +
-    '</div></header>';
+    (relation ? '<div class="relation">' + esc(relation) + '</div>' : "") +
+    '</div>' +
+    '<button class="home-toggle' + (isHome ? " active" : "") + '" data-person-id="' + esc(p.id) + '" ' +
+      'title="' + esc(isHome
+        ? "This is your home person (“you”). Click to clear."
+        : "Set as your home person (“you”) to see everyone’s relationship to you.") + '" ' +
+      'aria-label="' + (isHome ? "Home person" : "Set as home") + '">' +
+      houseIcon(isHome) +
+    '</button>' +
+    '</header>';
 }
 
 /* Carded sections put their label inside the card, above its hairline, as on the
@@ -1061,6 +1096,8 @@ function closeLightbox() { document.getElementById("lightbox").hidden = true; }
 
 function wireLightbox() {
   document.getElementById("sheet").addEventListener("click", e => {
+    const toggle = e.target.closest(".home-toggle");
+    if (toggle) { toggleHome(toggle.dataset.personId); return; }
     const tile = e.target.closest(".mtile");
     if (tile) openLightbox(tile);
   });
@@ -1173,6 +1210,171 @@ function childrenOfPerson(pid) {
   const kids = [];
   for (const fam of spouseFamiliesOf(pid)) for (const cid of (fam.childIds || [])) kids.push(cid);
   return kids;
+}
+function spousesOf(pid) {
+  return spouseFamiliesOf(pid).map(fam => spouseIn(fam, pid)).filter(Boolean);
+}
+
+/* ============================================================================
+   Relationship to the home person — faithful port of RelationshipCalculator.
+   swift: names how one person relates to another the way genealogists do
+   (parent, cousin, aunt/uncle, in-law, ...), working only from the same
+   parent/spouse graph the Family Explorer above already walks. Read
+   describeRelationship(otherId, subjectId) as "otherId is subjectId's
+   <label>" — e.g. otherId=subject's father ⇒ label "father".
+   ========================================================================== */
+
+/* Every ancestor of `pid` (and `pid` itself, at depth 0), mapped to the
+   fewest generations up to reach them. BFS, so the first depth seen is the
+   least; a depth cap plus the visited guard keep a data loop from running
+   away. */
+function ancestorDepths(pid) {
+  const depths = new Map();
+  const queue = [[pid, 0]];
+  while (queue.length) {
+    const [id, depth] = queue.shift();
+    const existing = depths.get(id);
+    if (existing !== undefined && existing <= depth) continue;
+    depths.set(id, depth);
+    if (depth >= 64) continue;
+    const f = fatherOf(id), m = motherOf(id);
+    if (f) queue.push([f.id, depth + 1]);
+    if (m) queue.push([m.id, depth + 1]);
+  }
+  return depths;
+}
+
+function pickTerm(sex, m, f, n) { return sex === "M" ? m : sex === "F" ? f : n; }
+function greats(n) { return n > 0 ? "great-".repeat(n) : ""; }
+function grandChain(extra) { return extra > 0 ? greats(extra - 1) + "grand" : ""; }
+function wordOrdinal(n) {
+  const words = ["", "first", "second", "third", "fourth", "fifth", "sixth",
+                 "seventh", "eighth", "ninth", "tenth"];
+  return n < words.length ? words[n] : ordinalSuffix(n);
+}
+function ordinalSuffix(n) {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return n + "th";
+  switch (n % 10) { case 1: return n + "st"; case 2: return n + "nd"; case 3: return n + "rd"; default: return n + "th"; }
+}
+function ancestorTerm(levels, sex) {
+  if (levels === 1) return pickTerm(sex, "father", "mother", "parent");
+  if (levels === 2) return pickTerm(sex, "grandfather", "grandmother", "grandparent");
+  return greats(levels - 2) + pickTerm(sex, "grandfather", "grandmother", "grandparent");
+}
+function descendantTerm(levels, sex) {
+  if (levels === 1) return pickTerm(sex, "son", "daughter", "child");
+  if (levels === 2) return pickTerm(sex, "grandson", "granddaughter", "grandchild");
+  return greats(levels - 2) + pickTerm(sex, "grandson", "granddaughter", "grandchild");
+}
+function siblingTerm(sex) { return pickTerm(sex, "brother", "sister", "sibling"); }
+function auntUncleTerm(extra, sex) { return grandChain(extra) + pickTerm(sex, "uncle", "aunt", "aunt/uncle"); }
+function nieceNephewTerm(extra, sex) { return grandChain(extra) + pickTerm(sex, "nephew", "niece", "niece/nephew"); }
+function cousinTerm(degree, removed) {
+  let s = wordOrdinal(degree) + " cousin";
+  if (removed === 1) s += " once removed";
+  else if (removed === 2) s += " twice removed";
+  else if (removed > 2) s += " " + removed + " times removed";
+  return s;
+}
+
+/* dSubject/dOther: generations from subject/other up to their nearest common
+   ancestor (0 ⇒ that person IS the common ancestor). `sex` is the sex of the
+   person the label describes ("other"). */
+function relationLabel(dSubject, dOther, isHalf, sex) {
+  if (dSubject === 0) return descendantTerm(dOther, sex);
+  if (dOther === 0) return ancestorTerm(dSubject, sex);
+  const nearer = Math.min(dSubject, dOther), farther = Math.max(dSubject, dOther);
+  if (nearer === 1) {
+    if (farther === 1) return (isHalf ? "half-" : "") + siblingTerm(sex);
+    const extra = farther - 2;
+    return (isHalf ? "half " : "") + (dOther === 1 ? auntUncleTerm(extra, sex) : nieceNephewTerm(extra, sex));
+  }
+  return (isHalf ? "half " : "") + cousinTerm(nearer - 1, farther - nearer);
+}
+
+/* The blood (shared-ancestor) relationship of otherId to subjectId, or null. */
+function bloodRelationship(otherId, subjectId) {
+  if (otherId === subjectId) return null;
+  const subjectAncestors = ancestorDepths(subjectId);
+  const otherAncestors = ancestorDepths(otherId);
+  const commons = [];
+  for (const [id, dSubject] of subjectAncestors) {
+    if (otherAncestors.has(id)) commons.push({ dSubject, dOther: otherAncestors.get(id) });
+  }
+  if (!commons.length) return null;
+  const minSum = Math.min(...commons.map(c => c.dSubject + c.dOther));
+  const nearest = commons.filter(c => c.dSubject + c.dOther === minSum);
+  const dSubject = nearest[0].dSubject, dOther = nearest[0].dOther;
+  const isHalf = dSubject > 0 && dOther > 0 && nearest.length < 2;
+  const other = byId.get(otherId);
+  return { label: relationLabel(dSubject, dOther, isHalf, other && other.sex), subjectUp: dSubject, otherUp: dOther, isHalf };
+}
+
+/* Closer links rank lower (win); core in-law terms beat "by marriage" fallbacks. */
+function isCoreInLaw(base) {
+  return (base.subjectUp === 1 && base.otherUp === 0) ||
+         (base.subjectUp === 0 && base.otherUp === 1) ||
+         (base.subjectUp === 1 && base.otherUp === 1);
+}
+function rankFor(base) {
+  const sum = base.subjectUp + base.otherUp;
+  return isCoreInLaw(base) ? sum : 10 + sum;
+}
+/* otherId is a blood relative of one of subjectId's spouses; base describes
+   otherId relative to that spouse. */
+function spouseSideInLaw(base, otherSex) {
+  const a = base.subjectUp, b = base.otherUp;
+  if (a === 1 && b === 0) return pickTerm(otherSex, "father-in-law", "mother-in-law", "parent-in-law");
+  if (a === 1 && b === 1) return pickTerm(otherSex, "brother-in-law", "sister-in-law", "sibling-in-law");
+  if (a === 0 && b === 1) return pickTerm(otherSex, "step-son", "step-daughter", "step-child");
+  return base.label + " by marriage";
+}
+/* otherId is married to inlawId, a blood relative of subjectId; base
+   describes inlawId relative to subjectId. */
+function relativeSideInLaw(base, otherSex) {
+  const a = base.subjectUp, b = base.otherUp;
+  if (a === 0 && b === 1) return pickTerm(otherSex, "son-in-law", "daughter-in-law", "child-in-law");
+  if (a === 1 && b === 1) return pickTerm(otherSex, "brother-in-law", "sister-in-law", "sibling-in-law");
+  if (a === 1 && b === 0) return pickTerm(otherSex, "step-father", "step-mother", "step-parent");
+  return relationLabel(base.subjectUp, base.otherUp, base.isHalf, otherSex) + " by marriage";
+}
+function inLawRelationship(otherId, subjectId) {
+  let best = null;
+  const consider = (rank, label) => { if (label != null && (!best || rank < best.rank)) best = { rank, label }; };
+  const other = byId.get(otherId);
+  for (const spouse of spousesOf(subjectId)) {
+    const base = bloodRelationship(otherId, spouse.id);
+    if (base) consider(rankFor(base), spouseSideInLaw(base, other && other.sex));
+  }
+  for (const inlaw of spousesOf(otherId)) {
+    const base = bloodRelationship(inlaw.id, subjectId);
+    if (base) consider(rankFor(base), relativeSideInLaw(base, other && other.sex));
+  }
+  return best ? { label: best.label } : null;
+}
+
+/* otherId's relationship to subjectId — blood first, then a direct marriage,
+   then in-laws (relatives by marriage) — or null if unrelated. */
+function describeRelationship(otherId, subjectId) {
+  if (otherId === subjectId) return { label: "the same person" };
+  const blood = bloodRelationship(otherId, subjectId);
+  if (blood) return blood;
+  if (spousesOf(subjectId).some(s => s.id === otherId)) {
+    const other = byId.get(otherId);
+    return { label: pickTerm(other && other.sex, "husband", "wife", "spouse") };
+  }
+  return inLawRelationship(otherId, subjectId);
+}
+
+/* "This is you" / "Your great-grandmother" / etc. for the Details page
+   header, or null if no home person is set or they aren't related. */
+function homeRelationshipPhrase(personId, homeId) {
+  if (!homeId) return null;
+  if (personId === homeId) return "This is you";
+  const r = describeRelationship(personId, homeId);
+  if (!r) return null;
+  return r.label === "the same person" ? "This is you" : "Your " + r.label;
 }
 
 const ExplorerMetrics = {
@@ -1713,6 +1915,25 @@ function idbClear(db, store) {
   });
 }
 
+/* This device's chosen home person ("you"), if any — see homePersonId above. */
+async function loadHomePersonId() {
+  try {
+    const db = await openDB();
+    return (await idbGet(db, "kv", "homePersonId")) || null;
+  } catch (e) { return null; }
+}
+
+/* Toggling clears it back to none. Persisted immediately; the current page
+   re-renders so the header/button reflect the change right away. */
+async function toggleHome(personId) {
+  homePersonId = homePersonId === personId ? null : personId;
+  try {
+    const db = await openDB();
+    await idbPutAll(db, "kv", [["homePersonId", homePersonId]]);
+  } catch (e) { /* no persistence available; still reflects for this render */ }
+  if (currentId) show(currentId);
+}
+
 /* Loads whatever was imported on a previous visit, if anything. */
 async function loadStoredBundle() {
   try {
@@ -2046,6 +2267,7 @@ function renderApp() {
 
 async function boot() {
   wireUI();
+  homePersonId = await loadHomePersonId();
 
   const stored = await loadStoredBundle();
   if (stored) { applyTree(stored.tree, false, stored.importedAt); renderApp(); return; }
