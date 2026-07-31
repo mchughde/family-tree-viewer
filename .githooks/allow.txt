@@ -6,9 +6,11 @@
 #
 # NOTE: this file is committed, so it must never hold anything actually private.
 
-# The project's own name, already throughout the repo, the app title and the
-# window title. Reconsider before the Pages site goes public: a public
-# "McHugh Family Tree" heading says whose tree it is.
+# The project owner's surname — already public via the GitHub account/URL
+# (mchughde/family-tree-viewer), so allowing it here adds no new exposure.
+# Confirmed 31 July 2026: it does not appear in the app's title, headings, or
+# any committed file. Kept as a standing allowance only in case incidental
+# prose (a commit message, a code comment) needs it.
 mchugh
 
 # Ordinary English words that are also names in this tree. Each is a small hole —
